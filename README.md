@@ -5,7 +5,7 @@
 ## Architecture
 
 <!-- Add your architecture diagram here, e.g.: ![Architecture](docs/screenshots/architecture-diagram.png) -->
-
+![Architecture](docs/screenshots/architecture-diagram.png)
 
 ## Features
 
