@@ -1,0 +1,35 @@
+# ─── Dependencies ─────────────────
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# ─── Environment ──────────────────
+.env
+!.env.example
+
+# ─── IDE ──────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ─── OS ───────────────────────────
+.DS_Store
+Thumbs.db
+
+# ─── Build artifacts ──────────────
+frontend/dist/
+gnn/aegis_gnn.pt
+
+# ─── Archives ─────────────────────
+*.zip
+*.tar.gz
+
+# ─── MQTT / Data ──────────────────
+mosquitto/data/
+mosquitto/log/

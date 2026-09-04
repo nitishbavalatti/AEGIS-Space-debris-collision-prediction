@@ -1,0 +1,185 @@
+/* ─── AEGIS Design System ─────────────────────────────────────────────── */
+:root {
+  /* Palette — deep space ops center */
+  --void:        #020408;
+  --deep:        #060d14;
+  --panel:       #0a1520;
+  --panel-border:#0f2035;
+  --surface:     #0d1e2e;
+  --surface-2:   #112233;
+
+  /* Accents */
+  --amber:       #f59e0b;
+  --amber-dim:   #92600a;
+  --amber-glow:  rgba(245, 158, 11, 0.15);
+  --red:         #ef4444;
+  --red-dim:     #7f1d1d;
+  --red-glow:    rgba(239, 68, 68, 0.15);
+  --green:       #22c55e;
+  --green-dim:   #14532d;
+  --green-glow:  rgba(34, 197, 94, 0.12);
+  --cyan:        #06b6d4;
+  --cyan-dim:    #164e63;
+  --cyan-glow:   rgba(6, 182, 212, 0.12);
+  --blue:        #3b82f6;
+
+  /* Text */
+  --text-primary:   #e2ecf5;
+  --text-secondary: #7da8c8;
+  --text-dim:       #3a5a78;
+  --text-label:     #4a7a9b;
+
+  /* Typography */
+  --font-display: 'Orbitron', monospace;
+  --font-mono:    'JetBrains Mono', monospace;
+  --font-body:    'Space Grotesk', sans-serif;
+
+  /* Spacing */
+  --gap-xs: 4px;
+  --gap-sm: 8px;
+  --gap-md: 16px;
+  --gap-lg: 24px;
+  --gap-xl: 32px;
+
+  /* Panel */
+  --radius: 4px;
+  --border: 1px solid var(--panel-border);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  width: 100%; height: 100%;
+  background: var(--void);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: var(--panel); }
+::-webkit-scrollbar-thumb { background: var(--panel-border); border-radius: 2px; }
+
+/* Utility */
+.mono { font-family: var(--font-mono); }
+.orbitron { font-family: var(--font-display); }
+
+/* Scanline overlay — subtle CRT texture for ops center feel */
+body::after {
+  content: '';
+  position: fixed; inset: 0;
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0,0,0,0.03) 2px,
+    rgba(0,0,0,0.03) 4px
+  );
+  pointer-events: none;
+  z-index: 9999;
+}
+
+/* Panel base */
+.panel {
+  background: var(--panel);
+  border: var(--border);
+  border-radius: var(--radius);
+  position: relative;
+  overflow: hidden;
+}
+
+.panel::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--cyan-dim), transparent);
+}
+
+/* Panel header */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: var(--gap-sm);
+  padding: 10px var(--gap-md);
+  border-bottom: var(--border);
+  background: var(--deep);
+}
+
+.panel-title {
+  font-family: var(--font-display);
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+/* Status dot */
+.status-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-dot.green  { background: var(--green); box-shadow: 0 0 6px var(--green); animation: pulse-green 2s infinite; }
+.status-dot.amber  { background: var(--amber); box-shadow: 0 0 6px var(--amber); animation: pulse-amber 1.5s infinite; }
+.status-dot.red    { background: var(--red);   box-shadow: 0 0 6px var(--red);   animation: pulse-red 1s infinite; }
+.status-dot.dim    { background: var(--text-dim); }
+
+/* Pulse animations */
+@keyframes pulse-green {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.4; }
+}
+@keyframes pulse-amber {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.3; }
+}
+@keyframes pulse-red {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px var(--red); }
+  50%       { opacity: 0.5; box-shadow: 0 0 14px var(--red); }
+}
+
+/* Data readout */
+.data-value {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--amber);
+}
+.data-label {
+  font-size: 9px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+
+/* Risk badge */
+.risk-badge {
+  font-family: var(--font-display);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+.risk-badge.CRITICAL { background: var(--red-dim);   color: var(--red);   border: 1px solid var(--red); }
+.risk-badge.HIGH     { background: rgba(234,88,12,.2); color: #fb923c; border: 1px solid #fb923c; }
+.risk-badge.MEDIUM   { background: var(--amber-glow); color: var(--amber); border: 1px solid var(--amber-dim); }
+.risk-badge.LOW      { background: var(--green-dim);  color: var(--green); border: 1px solid var(--green); }
+
+/* Blink animation for alerts */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+.blink { animation: blink 1s step-end infinite; }
+
+/* Fade in */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fadeInUp 0.4s ease forwards; }
