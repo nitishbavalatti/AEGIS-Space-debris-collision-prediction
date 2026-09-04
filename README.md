@@ -147,29 +147,45 @@ data looks off — see each script's docstring for what it checks.
 
 ## Screenshots
 
-**Mission control overview — 3D globe with live debris field**
-![Globe overview](docs/screenshots/globe-overview.png)
+<p align="center">
+  <img src="docs/screenshots/globe-overview.png" width="700" alt="Globe overview"/>
+  <br/><sub>Mission control overview — 3D globe with live debris field</sub>
+</p>
 
-**Object tracking — orbital path prediction for a selected debris object**
-![Globe tracking](docs/screenshots/globe-tracking.png)
+<p align="center">
+  <img src="docs/screenshots/globe-tracking.png" width="700" alt="Globe tracking"/>
+  <br/><sub>Object tracking — orbital path prediction for a selected debris object</sub>
+</p>
 
-**Active Threat Feed — top-ranked objects by GNN risk score**
-![Active Threat Feed](docs/screenshots/threat-feed.png)
+<p align="center">
+  <img src="docs/screenshots/threat-feed.png" width="450" alt="Active Threat Feed"/>
+  <br/><sub>Active Threat Feed — top-ranked objects by GNN risk score</sub>
+</p>
 
-**ISS Proximity Alert**
-![ISS Proximity](docs/screenshots/iss-proximity.png)
+<p align="center">
+  <img src="docs/screenshots/iss-proximity.png" width="450" alt="ISS Proximity"/>
+  <br/><sub>ISS Proximity Alert</sub>
+</p>
 
-**Solar Weather — live NOAA SWPC feed**
-![Solar Weather](docs/screenshots/solar-weather.png)
+<p align="center">
+  <img src="docs/screenshots/solar-weather.png" width="450" alt="Solar Weather"/>
+  <br/><sub>Solar Weather — live NOAA SWPC feed</sub>
+</p>
 
-**Sensor ↔ Risk Score Correlation**
-![Solar Correlation](docs/screenshots/solar-correlation.png)
+<p align="center">
+  <img src="docs/screenshots/solar-correlation.png" width="700" alt="Solar Correlation"/>
+  <br/><sub>Sensor ↔ Risk Score Correlation</sub>
+</p>
 
-**RF Monitor — RTL-SDR @ 137MHz**
-![RF Monitor](docs/screenshots/rf-monitor.png)
+<p align="center">
+  <img src="docs/screenshots/rf-monitor.png" width="450" alt="RF Monitor"/>
+  <br/><sub>RF Monitor — RTL-SDR @ 137MHz</sub>
+</p>
 
-**Kessler Syndrome Simulator**
-![Kessler Simulator](docs/screenshots/kessler-simulator.png)
+<p align="center">
+  <img src="docs/screenshots/kessler-simulator.png" width="450" alt="Kessler Simulator"/>
+  <br/><sub>Kessler Syndrome Simulator</sub>
+</p>
 
 ## Project Structure
 
