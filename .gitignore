@@ -33,3 +33,4 @@ gnn/aegis_gnn.pt
 # ─── MQTT / Data ──────────────────
 mosquitto/data/
 mosquitto/log/
+*.timestamp-*.mjs
