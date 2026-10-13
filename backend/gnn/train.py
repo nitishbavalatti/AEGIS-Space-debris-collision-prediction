@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from backend.gnn.model import (
     DebrisGNN, build_graph_from_tle_data,
-    NODE_FEATURE_DIM, _project_altitude,
+    NODE_FEATURE_DIM, FEATURE_VERSION, _project_altitude,
 )
 from backend.services.spacetrack import get_debris_tle_sample_with_cdm_positives, get_cdm
 
@@ -100,7 +100,13 @@ def build_labels_from_cdm(
     high_risk_ids = set()
     for cdm in cdm_records:
         try:
-            miss_dist = float(cdm.get("MISS_DISTANCE", 9999))
+            # Space-Track cdm_public reports the closest-approach distance
+            # in METRES under MIN_RNG (the old "MISS_DISTANCE" key does not
+            # exist, so .get() always fell back to 9999 -> 0 CDM labels).
+            raw = cdm.get("MIN_RNG", cdm.get("MISS_DISTANCE"))
+            if raw is None:
+                continue
+            miss_dist = float(raw)
             if miss_dist < 1000:
                 high_risk_ids.add(str(cdm.get("SAT_1_ID", "")))
                 high_risk_ids.add(str(cdm.get("SAT_2_ID", "")))
@@ -148,7 +154,15 @@ def _weighted_bce(probs: torch.Tensor, labels: torch.Tensor, pos_weight: float) 
     """
     eps = 1e-7
     p = probs.clamp(eps, 1 - eps)
-    per_sample = -(pos_weight * labels * torch.log(p) + (1 - labels) * torch.log(1 - p))
+    # pos_weight applies ONLY to genuine positives (label > 0.5 — the same threshold
+    # _prf1 uses to count a positive). It used to multiply every label's positive
+    # term, so a soft label of 0.5 (the "sits in a dense band" density label) had
+    # its loss minimised at a predicted score of w/(w+1) = 0.97 for w = 37: the
+    # model was trained to flag every density-band object as near-certain, while the
+    # metric counts them as NEGATIVES. That was a large part of the 0.07 precision.
+    # With this gate a 0.5 label is fit to ~0.5, and 1.0 / 0.9 labels stay up-weighted.
+    w = torch.where(labels > 0.5, torch.full_like(labels, float(pos_weight)), torch.ones_like(labels))
+    per_sample = -(w * labels * torch.log(p) + (1 - labels) * torch.log(1 - p))
     return per_sample.mean()
 
 
@@ -287,6 +301,17 @@ def train():
             train_high = (risk_scores[train_idx] > 0.5).sum().item()
             pos_mean = pos_scores.mean().item() if len(pos_scores) > 0 else float("nan")
             neg_mean = neg_scores.mean().item() if len(neg_scores) > 0 else float("nan")
+            # Recall on CDM-confirmed val nodes only (label == 1.0): the one
+            # metric that is NOT just the model re-learning the heuristic.
+            cdm_mask = labels[val_idx] == 1.0
+            cdm_recall = (
+                (val_scores[val_idx][cdm_mask] > 0.5).float().mean().item()
+                if cdm_mask.any() else float("nan")
+            )
+            logger.info(
+                f"CDM-only val recall: {cdm_recall:.2f} "
+                f"({int(cdm_mask.sum().item())} CDM nodes in val)"
+            )
             logger.info(
                 f"Epoch {epoch+1:3d}/{EPOCHS} | "
                 f"Train Loss: {loss.item():.4f} | Val Loss: {val_loss:.4f} | "
@@ -298,7 +323,10 @@ def train():
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             os.makedirs(os.path.dirname(CHECKPOINT_PATH), exist_ok=True)
-            torch.save(model.state_dict(), CHECKPOINT_PATH)
+            torch.save(
+                {"feature_version": FEATURE_VERSION, "state_dict": model.state_dict()},
+                CHECKPOINT_PATH,
+            )
 
     logger.info(f"Training complete. Best val loss: {best_val_loss:.4f}")
     logger.info(f"Model saved to: {CHECKPOINT_PATH}")

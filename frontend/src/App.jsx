@@ -1,3 +1,4 @@
+import { useState, useEffect } from "react";
 import "./index.css";
 import { useAegis } from "./hooks/useAegis.jsx";
 import TopBar from "./components/TopBar";
@@ -9,6 +10,7 @@ import KesslerSimulator from "./components/KesslerSimulator";
 import SolarWeather from "./components/SolarWeather";
 import RFMonitor from "./components/RFMonitor";
 import CollisionPopup from "./components/CollisionPopup";
+import ConjunctionTimeline from "./components/ConjunctionTimeline";
 
 function Cell({ children, style = {} }) {
   return (
@@ -28,6 +30,21 @@ function Cell({ children, style = {} }) {
 
 export default function App() {
   const aegis = useAegis();
+  const [showConj, setShowConj] = useState(false);
+
+  // Close the conjunction pop-up with Esc
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === "Escape") setShowConj(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
+  const realConj = (aegis.conjunctions ?? []).filter(c => !c._is_mock);
+  // Show "scanning" until the FIRST run has completed, so "still screening" doesn't
+  // read as "0 conjunctions".
+  const conjScanning = !!aegis.conjunctionsScreening && !aegis.lastScreened;
+  const conjAlert = realConj.some(c => c.alert === "RED") ? "RED"
+                  : realConj.some(c => c.alert === "AMBER") ? "AMBER" : null;
 
   return (
     <div style={{
@@ -41,10 +58,46 @@ export default function App() {
       <TopBar
         connected={aegis.connected}
         sensorSource={aegis.sensorSource}
+        sensorDetail={aegis.sensorDetail}
         debrisCount={aegis.debrisCount}
         currentRisk={aegis.currentRisk}
         solarAlert={aegis.solarAlert}
+        conjunctionCount={realConj.length}
+        conjunctionAlert={conjAlert}
+        conjunctionScanning={conjScanning}
+        onOpenConjunctions={() => setShowConj(true)}
       />
+
+      {showConj && (
+        <div
+          onClick={() => setShowConj(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 500,
+            background: "rgba(2,4,8,0.72)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{ width: "min(560px, 92vw)", height: "min(72vh, 600px)", position: "relative" }}
+          >
+            <button
+              onClick={() => setShowConj(false)}
+              aria-label="Close"
+              style={{
+                position: "absolute", top: 8, right: 10, zIndex: 2,
+                background: "none", border: "none", cursor: "pointer",
+                color: "var(--text-dim)", fontSize: 14,
+              }}
+            >✕</button>
+            <ConjunctionTimeline
+              conjunctions={aegis.conjunctions}
+              lastScreened={aegis.lastScreened}
+              isLoading={aegis.conjunctionsLoading || conjScanning}
+            />
+          </div>
+        </div>
+      )}
 
       <div style={{
         flex: 1,
@@ -61,7 +114,7 @@ export default function App() {
         {/* LEFT col rows 1-3: Threat Feed */}
         <div style={{ gridRow: "1 / 4", gridColumn: "1", minHeight: 0, overflow: "hidden" }}>
           <Cell style={{ overflow: "auto" }}>
-            <ThreatFeed topThreats={aegis.topThreats} loadMoreDebris={aegis.loadMoreDebris} />
+            <ThreatFeed topThreats={aegis.topThreats} loadMoreDebris={aegis.loadMoreDebris} isMock={aegis.debrisIsMock} />
           </Cell>
         </div>
 
@@ -76,6 +129,8 @@ export default function App() {
             debrisCount={aegis.debrisCount}
             issPosition={aegis.issPosition}
             conjunctions={aegis.conjunctions}
+            tierCounts={aegis.tierCounts}
+            isMock={aegis.debrisIsMock}
           />
           <CollisionPopup conjunctions={aegis.conjunctions} />
         </div>

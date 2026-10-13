@@ -10,59 +10,61 @@
  * Auto-cycles through all critical events every 8s.
  * Dismissible per-event. Never shows mock data.
  */
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
+
+// Unique per event. A debris object can appear in several pairs, so
+// norad_id alone is NOT unique (dismissing one event hid all of them).
+export const eventKey = (c) =>
+  `${c._type}:${c.norad_id}:${c.norad_id_b ?? ""}:${c.tca ?? ""}`;
 
 export default function CollisionPopup({ conjunctions }) {
-  const [visible,   setVisible]   = useState(false);
-  const [current,   setCurrent]   = useState(null);
-  const [dismissed, setDismissed] = useState(new Set());
-  const cycleRef = useRef(null);
+  const [dismissed,  setDismissed]  = useState(new Set());
+  const [currentKey, setCurrentKey] = useState(null);
+  const [now,        setNow]        = useState(Date.now());
 
-  // Only show real RED/AMBER events — never mock
-  const critical = (conjunctions ?? []).filter(
-    c => (c.alert === "RED" || c.alert === "AMBER") && !c._is_mock
+  // Only real RED/AMBER events — never mock
+  const critical = useMemo(
+    () => (conjunctions ?? []).filter(
+      c => (c.alert === "RED" || c.alert === "AMBER") && !c._is_mock
+    ),
+    [conjunctions]
   );
+  const active = useMemo(
+    () => critical.filter(c => !dismissed.has(eventKey(c))),
+    [critical, dismissed]
+  );
+  const current = active.find(c => eventKey(c) === currentKey) ?? active[0] ?? null;
 
-  // Show top undismissed event whenever critical list changes
+  // 1 Hz clock for the live countdown (all hooks stay ABOVE the early
+  // return below — the previous version called hooks after it, which
+  // crashes React the first time an event appears).
   useEffect(() => {
-    const next = critical.find(c => !dismissed.has(c.norad_id));
-    if (next) {
-      setCurrent(next);
-      setVisible(true);
-    } else {
-      setVisible(false);
-    }
-  }, [conjunctions]); // eslint-disable-line react-hooks/exhaustive-deps
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
 
-  // Auto-cycle through events every 8s when there are multiple
+  // Auto-cycle through events every 8s when there are several
+  const activeRef = useRef(active);
+  activeRef.current = active;
   useEffect(() => {
-    if (cycleRef.current) clearInterval(cycleRef.current);
-    if (critical.length <= 1) return;
-
-    cycleRef.current = setInterval(() => {
-      setCurrent(prev => {
-        const idx  = critical.findIndex(c => c.norad_id === prev?.norad_id);
-        return critical[(idx + 1) % critical.length];
+    if (active.length <= 1) return;
+    const id = setInterval(() => {
+      const list = activeRef.current;
+      setCurrentKey(prev => {
+        const idx = list.findIndex(c => eventKey(c) === prev);
+        return eventKey(list[(idx + 1) % list.length]);
       });
     }, 8000);
-
-    return () => clearInterval(cycleRef.current);
-  }, [critical.length]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => clearInterval(id);
+  }, [active.length]);
 
   const dismiss = () => {
     if (!current) return;
-    setDismissed(prev => new Set([...prev, current.norad_id]));
-    const next = critical.find(
-      c => c.norad_id !== current.norad_id && !dismissed.has(c.norad_id)
-    );
-    if (next) {
-      setCurrent(next);
-    } else {
-      setVisible(false);
-    }
+    setDismissed(prev => new Set([...prev, eventKey(current)]));
+    setCurrentKey(null);
   };
 
-  if (!visible || !current) return null;
+  if (!current) return null;
 
   const isRed   = current.alert === "RED";
   const isDxD   = current._type === "debris_debris";
@@ -71,27 +73,17 @@ export default function CollisionPopup({ conjunctions }) {
   const color = isRed ? "#ef4444" : "#f59e0b";
   const glow  = isRed ? "0 0 28px #ef444466" : "0 0 28px #f59e0b66";
 
-  // TCA live countdown
-  const [countdown, setCountdown] = useState("");
-  useEffect(() => {
-    if (!current?.tca_hours) return;
-    const startMs  = Date.now();
-    const startSec = current.tca_hours * 3600;
-
-    const tick = () => {
-      const remaining = Math.max(0, startSec - (Date.now() - startMs) / 1000);
-      if (remaining === 0) { setCountdown("NOW"); return; }
-      const h = Math.floor(remaining / 3600);
-      const m = Math.floor((remaining % 3600) / 60);
-      const s = Math.floor(remaining % 60);
-      setCountdown(
-        `${String(h).padStart(2,"0")}:${String(m).padStart(2,"0")}:${String(s).padStart(2,"0")}`
-      );
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [current?.norad_id]); // reset timer when event changes
+  // Live countdown from the absolute TCA timestamp (not the frozen
+  // tca_hours, which reset to a stale value on every data refresh).
+  const tcaMs = current.tca ? Date.parse(current.tca) : NaN;
+  const remaining = Number.isFinite(tcaMs)
+    ? Math.max(0, (tcaMs - now) / 1000)
+    : Math.max(0, (current.tca_hours ?? 0) * 3600);
+  const countdown = remaining <= 0
+    ? "NOW"
+    : `${String(Math.floor(remaining / 3600)).padStart(2, "0")}:` +
+      `${String(Math.floor((remaining % 3600) / 60)).padStart(2, "0")}:` +
+      `${String(Math.floor(remaining % 60)).padStart(2, "0")}`;
 
   return (
     <div style={{

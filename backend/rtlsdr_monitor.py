@@ -95,7 +95,10 @@ def run_rtlsdr_monitor():
         return
 
     # Connect MQTT
-    client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id="aegis-rtlsdr")
+    try:
+        client = mqtt_client.Client(mqtt_client.CallbackAPIVersion.VERSION1, client_id="aegis-rtlsdr")
+    except AttributeError:  # paho-mqtt 1.x
+        client = mqtt_client.Client(client_id="aegis-rtlsdr")
     try:
         client.connect(MQTT_BROKER, MQTT_PORT, 60)
         client.loop_start()
@@ -165,10 +168,10 @@ def run_rtlsdr_monitor():
                     "delta_dbfs": float(round(delta_dbfs, 3)),         # Python float
                     "storm_detected": storm_detected,  # Python bool
                     "alert_level": rf_alert,
-                },
-                "per_frequency": {
-                    f"{f/1e6:.3f}MHz": float(round(v, 2))
-                    for f, v in freq_readings.items()
+                    "per_frequency": {
+                        f"{f/1e6:.3f}MHz": float(round(v, 2))
+                        for f, v in freq_readings.items()
+                    },
                 },
             }
 
@@ -213,11 +216,13 @@ def _run_rtlsdr_mock(client):
                 noise += random.uniform(3, 10)
 
             delta = noise - baseline_dbm
+            baseline_dbfs = -45.0
+            delta_dbfs = delta * 2.0          # inverse of noise_dbm = -92 + delta_dbfs*0.5
             rf_alert = (
-                "SEVERE"   if delta > 10 else
-                "STRONG"   if delta > 7  else
-                "MODERATE" if delta > 4  else
-                "MINOR"    if delta > 2  else
+                "SEVERE"   if delta_dbfs > 20 else
+                "STRONG"   if delta_dbfs > 14 else
+                "MODERATE" if delta_dbfs > 8  else
+                "MINOR"    if delta_dbfs > 4  else
                 "NONE"
             )
 
@@ -227,10 +232,15 @@ def _run_rtlsdr_mock(client):
                 "source": "rtlsdr_mock",
                 "rf": {
                     "noise_dbm": round(noise, 2),
-                    "baseline_dbm": round(baseline_dbm, 2),
-                    "delta_dbm": round(delta, 2),
-                    "storm_detected": delta > 4,
+                    "noise_dbfs": round(baseline_dbfs + delta_dbfs, 3),
+                    "baseline_dbfs": baseline_dbfs,
+                    "delta_dbfs": round(delta_dbfs, 3),
+                    "storm_detected": bool(delta_dbfs > 6.0),
                     "alert_level": rf_alert,
+                    "per_frequency": {
+                        f"{f:.3f}MHz": round(baseline_dbfs + delta_dbfs + random.gauss(0, 0.4), 2)
+                        for f in (137.1, 137.62, 137.912)
+                    },
                     "note": "No RTL-SDR dongle — simulated data",
                 },
             }

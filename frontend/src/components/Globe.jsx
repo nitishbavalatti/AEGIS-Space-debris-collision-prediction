@@ -370,7 +370,7 @@ function resetStickyLerp() {}   // kept for call-site compat, no-op
 const HOME_LON = 20, HOME_LAT = 20, HOME_ALT_M = 22_000_000;
 
 // ── Component ─────────────────────────────────────────────────────────────────
-export default function Globe({ debrisObjects: propDebris = [], debrisCount = 0, issPosition }) {
+export default function Globe({ debrisObjects: propDebris = [], debrisCount = 0, issPosition, tierCounts = null, isMock = false }) {
   const containerRef   = useRef(null);
   const viewerRef      = useRef(null);
   const CesiumRef      = useRef(null);
@@ -766,8 +766,15 @@ export default function Globe({ debrisObjects: propDebris = [], debrisCount = 0,
   // ── Derived stats ─────────────────────────────────────────────────────────
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const total    = debrisCount || debrisObjects.length;
-  const critical = scoreEpoch >= 0 ? debrisObjects.filter(o => (o._score??0) >= 80).length : 0;
-  const high     = scoreEpoch >= 0 ? debrisObjects.filter(o => { const s=o._score??0; return s>=60&&s<80; }).length : 0;
+  // CRITICAL / HIGH come from the backend, counted over the WHOLE catalogue, so they
+  // describe the same set as TRACKED. (Counting the loaded subset made "5,000
+  // tracked / 101 critical" a mix of two different populations.) Falls back to the
+  // loaded subset only if the backend didn't send tier counts.
+  const critical = tierCounts ? tierCounts.critical
+    : (scoreEpoch >= 0 ? debrisObjects.filter(o => (o._score??0) >= 80).length : 0);
+  const high     = tierCounts ? tierCounts.high
+    : (scoreEpoch >= 0 ? debrisObjects.filter(o => { const s=o._score??0; return s>=60&&s<80; }).length : 0);
+  const drawn    = Math.min(debrisObjects.length, 2000);
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -805,6 +812,13 @@ export default function Globe({ debrisObjects: propDebris = [], debrisCount = 0,
           <Stat label="TRACKED"   value={total.toLocaleString()}    color="var(--cyan)"/>
           <Stat label="CRITICAL"  value={critical.toLocaleString()} color={SCORE_COLORS.critical}/>
           <Stat label="HIGH RISK" value={high.toLocaleString()}      color={SCORE_COLORS.high}/>
+        </div>
+      )}
+      {cesiumReady && (drawn < total || isMock) && (
+        <div style={{ position:"absolute", top:58, left:"50%", transform:"translateX(-50%)",
+          fontFamily:"var(--font-mono)", fontSize:8, letterSpacing:"0.12em", whiteSpace:"nowrap",
+          color: isMock ? "var(--amber)" : "var(--text-dim)", pointerEvents:"none" }}>
+          {isMock ? "DEMO DATA · SPACE-TRACK UNAVAILABLE" : `SHOWING ${drawn.toLocaleString()} OF ${total.toLocaleString()} · TOP 300 BY RISK + SAMPLE`}
         </div>
       )}
 

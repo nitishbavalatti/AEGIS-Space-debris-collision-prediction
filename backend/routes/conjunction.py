@@ -3,10 +3,33 @@ Conjunction routes — upcoming close approach predictions.
 Covers both Debris×ISS and Debris×Debris events.
 """
 from flask import Blueprint, jsonify, request, current_app
+from datetime import datetime, timezone
 import logging
 
 logger = logging.getLogger(__name__)
 conjunction_bp = Blueprint("conjunction", __name__, url_prefix="/api/conjunction")
+
+
+def _live_events(conjunctions):
+    """Recompute tca_hours from the stored TCA timestamp at request time and
+    drop events whose TCA has already passed. tca_hours is frozen at
+    screening time, so without this the UI shows stale countdowns and keeps
+    expired events until the next 30-minute screening run."""
+    now = datetime.now(timezone.utc)
+    out = []
+    for c in conjunctions:
+        try:
+            tca = datetime.fromisoformat(c["tca"])
+            if tca.tzinfo is None:
+                tca = tca.replace(tzinfo=timezone.utc)
+            hrs = (tca - now).total_seconds() / 3600
+        except (KeyError, ValueError, TypeError):
+            out.append(c)
+            continue
+        if hrs < 0:
+            continue
+        out.append({**c, "tca_hours": round(hrs, 3)})
+    return out
 
 
 @conjunction_bp.route("/upcoming")
@@ -22,7 +45,7 @@ def upcoming_conjunctions():
     event_type = request.args.get("type", "all")
 
     state        = current_app.config["APP_STATE"]
-    conjunctions = state.get("conjunctions", [])
+    conjunctions = _live_events(state.get("conjunctions", []))
 
     filtered = [
         c for c in conjunctions
@@ -43,6 +66,7 @@ def upcoming_conjunctions():
         "threshold_km":   threshold,
         "conjunctions":   filtered,
         "last_screened":  state.get("last_conjunction_screen"),
+        "screening":      bool(state.get("conjunction_screening")),
     })
 
 
@@ -54,7 +78,7 @@ def critical_conjunctions():
     Used by CollisionPopup.
     """
     state        = current_app.config["APP_STATE"]
-    conjunctions = state.get("conjunctions", [])
+    conjunctions = _live_events(state.get("conjunctions", []))
 
     critical = [
         c for c in conjunctions
@@ -79,7 +103,7 @@ def conjunction_stats():
     Summary counts broken down by event type and alert level.
     """
     state        = current_app.config["APP_STATE"]
-    conjunctions = state.get("conjunctions", [])
+    conjunctions = _live_events(state.get("conjunctions", []))
     real         = [c for c in conjunctions if not c.get("_is_mock")]
 
     red_iss   = sum(1 for c in real if c.get("alert") == "RED"   and c.get("_type") == "debris_iss")

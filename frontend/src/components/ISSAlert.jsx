@@ -24,7 +24,7 @@ export default function ISSAlert({ issPosition, issProximity }) {
           borderRadius:2, padding:"8px 8px",
         }}>
           <div style={{ fontSize:7, letterSpacing:"0.2em", color:"var(--text-label)", marginBottom:3 }}>
-            NEAREST DEBRIS TO ISS
+            NEAREST DEBRIS TO ISS · NOW
           </div>
           <div style={{
             fontFamily:"var(--font-display)", fontWeight:900,
@@ -33,7 +33,9 @@ export default function ISSAlert({ issPosition, issProximity }) {
           }}>
             {dist != null ? dist.toFixed(2) : "—"}
           </div>
-          <div style={{ fontSize:8, color:alertColor, opacity:0.7, marginTop:2 }}>KILOMETERS</div>
+          <div style={{ fontSize:8, color:alertColor, opacity:0.7, marginTop:2 }}>
+            KILOMETERS{issProximity?.checked ? ` · OF ${issProximity.checked.toLocaleString()} OBJECTS` : ""}
+          </div>
           <div style={{
             marginTop:5, display:"inline-block",
             padding:"2px 10px",

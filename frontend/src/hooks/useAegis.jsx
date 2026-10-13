@@ -31,13 +31,25 @@ export function useAegis() {
   const [topThreats, setTopThreats] = useState([]);
   const [altitudeBands, setAltitudeBands] = useState([]);
   const [debrisCount, setDebrisCount] = useState(0);
-  const DEBRIS_PAGE_SIZE = 500;
+  // Globe draws at most 2000 entities, so ask for the 2000 highest-risk objects
+  // (sort=risk) instead of the first 500 in catalogue order.
+  const DEBRIS_PAGE_SIZE = 2000;
+  const [tierCounts, setTierCounts] = useState(null);      // whole-catalogue {critical, high}
+  const [debrisIsMock, setDebrisIsMock] = useState(false);  // true while showing demo objects
   
   // ISS state
   const [rawIssPosition, setRawIssPosition] = useState(null);
   const [issPosition, setIssPosition] = useState(null);
   const [issProximity, setIssProximity] = useState(null);
   const issInterpolRef = useRef(null);
+
+  // Conjunction state (debris×ISS + debris×debris) — previously never
+  // fetched, so CollisionPopup always received `undefined` and could not show.
+  const [conjunctions, setConjunctions] = useState([]);
+  const [lastScreened, setLastScreened] = useState(null);
+  const [conjunctionsScreening, setConjunctionsScreening] = useState(false);  // a screening run is in progress
+  const [sensorDetail, setSensorDetail] = useState(null);                      // "rtlsdr" | "esp32+rtlsdr" | ...
+  const [conjunctionsLoading, setConjunctionsLoading] = useState(true);
 
   // Solar / sensor state
   const [solarSummary, setSolarSummary] = useState(null);
@@ -59,7 +71,7 @@ export function useAegis() {
   const fetchDebris = useCallback(async (reset = false) => {
     const start = reset ? 0 : debrisStart;
     const [listRes, threatRes, heatRes] = await Promise.allSettled([
-      axios.get(`${API}/debris/list?start=${start}&limit=${DEBRIS_PAGE_SIZE}`),
+      axios.get(`${API}/debris/list?start=${start}&limit=${DEBRIS_PAGE_SIZE}&sort=mixed`),
       axios.get(`${API}/debris/top-threats?n=15`),
       axios.get(`${API}/debris/heatmap`),
     ]);
@@ -104,6 +116,8 @@ export function useAegis() {
         setDebrisStart((prev) => prev + newObjs.length);
       }
       setDebrisCount(listRes.value.data.total || 0);
+      setTierCounts(listRes.value.data.tiers || null);
+      setDebrisIsMock(!!listRes.value.data.is_mock_data);
     } else {
       console.error("Debris list fetch failed:", listRes.reason);
     }
@@ -115,9 +129,14 @@ export function useAegis() {
     }
   }, [debrisStart]);
 
+  // The socket effect below runs once, so its handlers would otherwise capture
+  // a stale fetchDebris. Always call through this ref.
+  const fetchDebrisRef = useRef(fetchDebris);
+  useEffect(() => { fetchDebrisRef.current = fetchDebris; }, [fetchDebris]);
+
   const loadMoreDebris = useCallback(async () => {
     try {
-      const res = await axios.get(`${API}/debris/list?start=${debrisStart}&limit=${DEBRIS_PAGE_SIZE}`);
+      const res = await axios.get(`${API}/debris/list?start=${debrisStart}&limit=${DEBRIS_PAGE_SIZE}&sort=risk`);
       const more = res.data.objects || [];
       if (more.length > 0) {
         setDebrisObjects((prev) => [...prev, ...more]);
@@ -139,6 +158,19 @@ export function useAegis() {
       setIssProximity(proxRes.data);
     } catch (e) {
       console.error("ISS fetch error:", e);
+    }
+  }, []);
+
+  const fetchConjunctions = useCallback(async () => {
+    try {
+      const res = await axios.get(`${API}/conjunction/upcoming?hours=72&threshold=25&type=all`);
+      setConjunctions(res.data.conjunctions || []);
+      setLastScreened(res.data.last_screened || null);
+      setConjunctionsScreening(!!res.data.screening);
+    } catch (e) {
+      console.error("Conjunction fetch error:", e);
+    } finally {
+      setConjunctionsLoading(false);
     }
   }, []);
 
@@ -223,7 +255,6 @@ export function useAegis() {
     try {
       const corrRes = await axios.get(`${API}/solar/correlation?hours=24`);
       setCorrelationSeries(corrRes.data.series || []);
-      setSensorSource(normalizeSensorSource(corrRes.data.sensor_source));
     } catch (e) {
       console.error("Correlation fetch error:", e);
     }
@@ -247,7 +278,26 @@ export function useAegis() {
       setDebrisCount(data.debris_count || 0);
       setCurrentRisk(data.risk_score   || 0);
       setSensorSource(normalizeSensorSource(data.sensor_source));
+      setSensorDetail(data.sensor_detail || null);
+      // (Re)connect — e.g. the backend was restarted while this page stayed open.
+      // Re-pull the debris so we don't keep showing the previous run's objects.
+      if ((data.debris_count || 0) > 0) fetchDebrisRef.current(true);
     });
+
+    // The pipeline publishes real objects (stage "heuristic") and then GNN-refined
+    // scores (stage "final"). Previously nothing told the page, so it only noticed
+    // on its 10-minute poll and kept showing the startup data until then.
+    socket.on("debris_updated", (data) => {
+      setCurrentRisk(data.risk_score || 0);
+      setDebrisCount(data.count || 0);
+      fetchDebrisRef.current(true);
+    });
+
+    // Backend pushes this after each screening run with RED/AMBER events.
+    socket.on("conjunction_alert", () => fetchConjunctions());
+    // After EVERY run (also when nothing is RED/AMBER), so the list/count update
+    // right away instead of on the next 60 s poll.
+    socket.on("conjunctions_updated", () => fetchConjunctions());
 
     socket.on("sensor_reading", (data) => {
       console.log("[AEGIS] socket sensor_reading", data);
@@ -259,6 +309,11 @@ export function useAegis() {
       };
       setLatestSensor(sensorUpdate);
       latestSensorRef.current = sensorUpdate;
+
+      // RF-only readings (no magnetometer yet — e.g. USGS unreachable) update the
+      // RF panel above but must NOT add a chart point: mag_total would default to 0
+      // and draw a false drop to zero on the correlation line.
+      if (sensorUpdate.mag?.total == null) return;
 
       setCorrelationSeries((prev) => {
         const point = {
@@ -310,12 +365,15 @@ export function useAegis() {
     fetchDebris(true);
     fetchISS();
     fetchSolar();
+    fetchConjunctions();
 
+    const conjTimer   = setInterval(fetchConjunctions, 60 * 1000);
     const debrisTimer = setInterval(() => fetchDebris(true), 10 * 60 * 1000);
     const issTimer    = setInterval(fetchISS,   30 * 1000);
     const solarTimer  = setInterval(fetchSolar, 30 * 1000);
 
     return () => {
+      clearInterval(conjTimer);
       clearInterval(debrisTimer);
       clearInterval(issTimer);
       clearInterval(solarTimer);
@@ -400,10 +458,14 @@ export function useAegis() {
   return {
     connected,
     sensorSource,
+    sensorDetail,
+    conjunctionsScreening,
     debrisObjects,
     topThreats,
     altitudeBands,
     debrisCount,
+    tierCounts,
+    debrisIsMock,
     issPosition,
     issProximity,
     solarSummary,
@@ -411,6 +473,9 @@ export function useAegis() {
     correlationSeries,
     solarAlert,
     currentRisk,
+    conjunctions,
+    lastScreened,
+    conjunctionsLoading,
     refresh: { fetchDebris, fetchISS, fetchSolar },
     loadMoreDebris,
   };

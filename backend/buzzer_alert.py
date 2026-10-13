@@ -8,21 +8,32 @@ highest active alert level changes.
 """
 import json
 import logging
+import os
 import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)
 
-MQTT_BROKER = "10.40.251.89"
-MQTT_PORT   = 1883
+MQTT_BROKER = os.getenv("MQTT_BROKER", "10.40.251.89")
+MQTT_PORT   = int(os.getenv("MQTT_PORT", 1883))
 MQTT_TOPIC  = "aegis/alert"
 
-_client = mqtt.Client(client_id="aegis-buzzer-publisher")
+def _make_client(client_id):
+    """paho-mqtt 2.x needs CallbackAPIVersion; 1.x doesn't have it."""
+    try:
+        return mqtt.Client(mqtt.CallbackAPIVersion.VERSION1, client_id=client_id)
+    except AttributeError:
+        return mqtt.Client(client_id=client_id)
+
+
+_client = _make_client("aegis-buzzer-publisher")
 _last_published_alert = None  # tracks last state sent, avoids spamming
 
 
 def _connect():
     try:
-        _client.connect(MQTT_BROKER, MQTT_PORT, keepalive=30)
+        # connect_async + loop_start retries in the background if the
+        # broker isn't up yet, instead of giving up after one failure.
+        _client.connect_async(MQTT_BROKER, MQTT_PORT, keepalive=30)
         _client.loop_start()
     except Exception as e:
         logger.warning(f"[Buzzer] MQTT connect failed: {e}")
@@ -51,7 +62,12 @@ def publish_buzzer_state(conjunctions):
 
     payload = json.dumps({"alert": alert, "type": event_type or ""})
     try:
-        _client.publish(MQTT_TOPIC, payload, qos=1, retain=True)
+        info = _client.publish(MQTT_TOPIC, payload, qos=1, retain=True)
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            # Not delivered -> don't record as sent, so the next screening
+            # run retries instead of the buzzer silently staying out of sync.
+            logger.warning(f"[Buzzer] Publish not delivered (rc={info.rc}) — will retry")
+            return
         logger.info(f"[Buzzer] Published alert state: {alert} ({event_type})")
         _last_published_alert = alert
     except Exception as e:

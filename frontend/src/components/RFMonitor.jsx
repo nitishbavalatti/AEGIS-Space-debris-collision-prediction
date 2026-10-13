@@ -1,8 +1,8 @@
 /**
  * RF Monitor — displays RTL-SDR noise floor readings
  * alert_level, storm_detected come DIRECTLY from backend — never recalculated.
- * Only noise_dbm and delta_dbfs get a tiny visual jitter (±0.3) per second
- * to show the feed is live when the parent prop cadence is slow.
+ * Values are shown exactly as received. The timestamp is the SENSOR's own
+ * reading time, and the panel flags itself STALE when it stops updating.
  */
 import { useEffect, useRef, useState } from "react";
 
@@ -36,13 +36,13 @@ export default function RFMonitor({ latestSensor }) {
         noise_dbm:  normalizeNumeric(rf.noise_dbm, -92),
         delta_dbfs: normalizeNumeric(rf.delta_dbfs, 0),
 
-        per_frequency: s.per_frequency
+        per_frequency: (rf.per_frequency || s.per_frequency)
           ? Object.fromEntries(
-              Object.entries(s.per_frequency).map(([f, v]) => [f, normalizeNumeric(v, 0)])
+              Object.entries(rf.per_frequency || s.per_frequency).map(([f, v]) => [f, normalizeNumeric(v, 0)])
             )
           : null,
 
-        timestamp: new Date().toISOString(),
+        timestamp: s.timestamp ?? rf.timestamp ?? null,
       });
     };
 
@@ -64,6 +64,9 @@ export default function RFMonitor({ latestSensor }) {
       </div>
     );
   }
+
+  const ageSec = display.timestamp ? (Date.now() - Date.parse(display.timestamp)) / 1000 : null;
+  const stale = ageSec != null && Number.isFinite(ageSec) && ageSec > 90;
 
   const alertColor = {
     NONE:     "var(--green)",
@@ -142,7 +145,7 @@ export default function RFMonitor({ latestSensor }) {
               {Object.entries(display.per_frequency).map(([freq, dbm]) => (
                 <div key={freq} style={{ display: "flex", justifyContent: "space-between", padding: "2px 0" }}>
                   <span style={{ fontFamily: "var(--font-display)", fontSize: 10, color: "var(--text-secondary)" }}>{freq}</span>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--cyan)" }}>{Number(dbm).toFixed(2)} dBm</span>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--cyan)" }}>{Number(dbm).toFixed(2)} dBFS</span>
                 </div>
               ))}
             </div>
@@ -150,7 +153,12 @@ export default function RFMonitor({ latestSensor }) {
         )}
 
         <div style={{ fontSize: 7, color: "var(--text-dim)", marginTop: "auto", paddingTop: 5, textAlign: "center", fontFamily: "var(--font-mono)" }}>
-          {new Date(display.timestamp).toLocaleTimeString()}
+          {display.timestamp
+            ? <>
+                {new Date(display.timestamp).toLocaleTimeString()}
+                {stale && <span style={{ color: "var(--red)", marginLeft: 6 }}>STALE · {Math.round(ageSec)}s</span>}
+              </>
+            : "NO TIMESTAMP"}
         </div>
       </div>
     </div>

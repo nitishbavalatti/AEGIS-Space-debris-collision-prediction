@@ -1,0 +1,39 @@
+{
+  "n_nodes": 2040,
+  "n_cdm": 42,
+  "folds": 5,
+  "epochs": 200,
+  "gnn": {
+    "precision": 0.03303684879288437,
+    "recall": 0.6190476190476191,
+    "f1": 0.06272617611580217,
+    "cdm_recall_hits": 26,
+    "cdm_total": 42,
+    "cdm_recall": 0.6190476190476191,
+    "flag_rate_on_low_risk": 0.3808808808808809,
+    "auc_cdm_vs_low": 0.6425473092139758,
+    "auc_cdm_vs_heuristic_high": NaN
+  },
+  "gnn_no_edges": {
+    "precision": 0.03543913713405239,
+    "recall": 0.5476190476190477,
+    "f1": 0.06657018813314038,
+    "cdm_recall_hits": 23,
+    "cdm_total": 42,
+    "cdm_recall": 0.5476190476190477,
+    "flag_rate_on_low_risk": 0.3133133133133133,
+    "auc_cdm_vs_low": 0.659707326373993,
+    "auc_cdm_vs_heuristic_high": NaN
+  },
+  "rule_baseline": {
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "cdm_recall_hits": 0,
+    "cdm_total": 42,
+    "cdm_recall": 0.0,
+    "flag_rate_on_low_risk": 0.0,
+    "auc_cdm_vs_low": 0.5508365508365508,
+    "auc_cdm_vs_heuristic_high": NaN
+  }
+}

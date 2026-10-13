@@ -1,0 +1,239 @@
+{
+  "summary": {
+    "generated": "2026-10-06T03:32:14.621557+00:00",
+    "cdm_records": 100,
+    "unique_conjunctions": 22,
+    "compared": 22,
+    "skipped_no_tle": 0,
+    "skipped_other": 0,
+    "median_abs_tca_err_s": 2.5,
+    "p90_abs_tca_err_s": 33.0,
+    "median_abs_miss_err_km": 17.736,
+    "p90_abs_miss_err_km": 121.906,
+    "within_10s_pct": 68.18181818181819,
+    "miss_within_1km_pct": 0.0,
+    "no_match_at_window_edge": 0
+  },
+  "rows": [
+    {
+      "pair": "CZ-6A DEB x COSMOS 2251 DEB",
+      "their_tca": "2026-09-06T05:02:31.280000+00:00",
+      "their_miss_km": 0.058,
+      "our_tca": "2026-09-06T05:02:18.280000+00:00",
+      "our_miss_km": 80.824,
+      "tca_err_s": -13.0,
+      "miss_err_km": 80.766,
+      "rel_vel_km_s": 13.23
+    },
+    {
+      "pair": "ARIANE 1 DEB x ARIANE 5 R/B",
+      "their_tca": "2026-09-06T10:10:23.381000+00:00",
+      "their_miss_km": 4.505,
+      "our_tca": "2026-09-06T10:10:01.381000+00:00",
+      "our_miss_km": 32.241,
+      "tca_err_s": -22.0,
+      "miss_err_km": 27.736,
+      "rel_vel_km_s": 6.91
+    },
+    {
+      "pair": "EKRAN 11 x GORIZONT 9",
+      "their_tca": "2026-09-06T18:17:50.476000+00:00",
+      "their_miss_km": 4.251,
+      "our_tca": "2026-09-06T18:17:27.476000+00:00",
+      "our_miss_km": 47.79,
+      "tca_err_s": -23.0,
+      "miss_err_km": 43.539,
+      "rel_vel_km_s": 0.08
+    },
+    {
+      "pair": "COSMOS 1829 x COSMOS 2491 DEB",
+      "their_tca": "2026-09-06T18:52:57.899000+00:00",
+      "their_miss_km": 0.934,
+      "our_tca": "2026-09-06T18:53:06.899000+00:00",
+      "our_miss_km": 81.653,
+      "tca_err_s": 9.0,
+      "miss_err_km": 80.719,
+      "rel_vel_km_s": 10.1
+    },
+    {
+      "pair": "THORAD DELTA 1 DEB x UNKNOWN",
+      "their_tca": "2026-09-06T19:21:16.407000+00:00",
+      "their_miss_km": 0.374,
+      "our_tca": "2026-09-06T19:21:16.407000+00:00",
+      "our_miss_km": 17.831,
+      "tca_err_s": 0.0,
+      "miss_err_km": 17.457,
+      "rel_vel_km_s": 14.0
+    },
+    {
+      "pair": "FENGYUN 1C DEB x DELTA 1 DEB",
+      "their_tca": "2026-09-06T23:13:53.700000+00:00",
+      "their_miss_km": 0.046,
+      "our_tca": "2026-09-06T23:13:52.700000+00:00",
+      "our_miss_km": 7.34,
+      "tca_err_s": -1.0,
+      "miss_err_km": 7.294,
+      "rel_vel_km_s": 11.92
+    },
+    {
+      "pair": "FENGYUN 1C DEB x CZ-6A DEB",
+      "their_tca": "2026-09-07T06:52:40.193000+00:00",
+      "their_miss_km": 0.088,
+      "our_tca": "2026-09-07T06:52:31.193000+00:00",
+      "our_miss_km": 121.994,
+      "tca_err_s": -9.0,
+      "miss_err_km": 121.906,
+      "rel_vel_km_s": 3.95
+    },
+    {
+      "pair": "NOAA 16 DEB x UNKNOWN",
+      "their_tca": "2026-09-07T14:34:33.406000+00:00",
+      "their_miss_km": 0.113,
+      "our_tca": "2026-09-07T14:33:44.406000+00:00",
+      "our_miss_km": 99.853,
+      "tca_err_s": -49.0,
+      "miss_err_km": 99.74,
+      "rel_vel_km_s": 14.43
+    },
+    {
+      "pair": "COSMOS 623 x THORAD DELTA 1 DEB",
+      "their_tca": "2026-09-07T16:35:49.032000+00:00",
+      "their_miss_km": 0.472,
+      "our_tca": "2026-09-07T16:35:49.032000+00:00",
+      "our_miss_km": 4.052,
+      "tca_err_s": 0.0,
+      "miss_err_km": 3.58,
+      "rel_vel_km_s": 13.39
+    },
+    {
+      "pair": "NOAA 16 DEB x FENGYUN 1C DEB",
+      "their_tca": "2026-09-07T17:41:32.122000+00:00",
+      "their_miss_km": 0.159,
+      "our_tca": "2026-09-07T17:40:46.122000+00:00",
+      "our_miss_km": 369.911,
+      "tca_err_s": -46.0,
+      "miss_err_km": 369.752,
+      "rel_vel_km_s": 0.5
+    },
+    {
+      "pair": "COSMOS 1375 DEB x COSMOS 1275 DEB",
+      "their_tca": "2026-09-07T17:45:27.129000+00:00",
+      "their_miss_km": 0.074,
+      "our_tca": "2026-09-07T17:45:02.129000+00:00",
+      "our_miss_km": 194.897,
+      "tca_err_s": -25.0,
+      "miss_err_km": 194.823,
+      "rel_vel_km_s": 12.52
+    },
+    {
+      "pair": "FENGYUN 1C DEB x SL-16 DEB",
+      "their_tca": "2026-09-07T19:55:59.415000+00:00",
+      "their_miss_km": 0.103,
+      "our_tca": "2026-09-07T19:55:59.415000+00:00",
+      "our_miss_km": 7.312,
+      "tca_err_s": 0.0,
+      "miss_err_km": 7.209,
+      "rel_vel_km_s": 14.07
+    },
+    {
+      "pair": "FENGYUN 1C DEB x COSMOS 1553",
+      "their_tca": "2026-09-07T23:30:47.012000+00:00",
+      "their_miss_km": 0.397,
+      "our_tca": "2026-09-07T23:30:48.012000+00:00",
+      "our_miss_km": 18.412,
+      "tca_err_s": 1.0,
+      "miss_err_km": 18.015,
+      "rel_vel_km_s": 5.52
+    },
+    {
+      "pair": "SL-8 R/B x COSMOS 1375 DEB",
+      "their_tca": "2026-09-08T00:59:20.839000+00:00",
+      "their_miss_km": 0.44,
+      "our_tca": "2026-09-08T00:59:21.839000+00:00",
+      "our_miss_km": 6.444,
+      "tca_err_s": 1.0,
+      "miss_err_km": 6.004,
+      "rel_vel_km_s": 4.37
+    },
+    {
+      "pair": "FENGYUN 1C DEB x UNKNOWN",
+      "their_tca": "2026-09-08T05:55:05.658000+00:00",
+      "their_miss_km": 0.159,
+      "our_tca": "2026-09-08T05:55:03.658000+00:00",
+      "our_miss_km": 20.076,
+      "tca_err_s": -2.0,
+      "miss_err_km": 19.917,
+      "rel_vel_km_s": 13.47
+    },
+    {
+      "pair": "ORBCOMM FM 3 x FENGYUN 1C DEB",
+      "their_tca": "2026-09-08T07:47:58.058000+00:00",
+      "their_miss_km": 0.175,
+      "our_tca": "2026-09-08T07:47:58.058000+00:00",
+      "our_miss_km": 6.665,
+      "tca_err_s": 0.0,
+      "miss_err_km": 6.49,
+      "rel_vel_km_s": 14.43
+    },
+    {
+      "pair": "SL-8 DEB x UNKNOWN",
+      "their_tca": "2026-09-08T17:03:54.044000+00:00",
+      "their_miss_km": 0.193,
+      "our_tca": "2026-09-08T17:03:54.044000+00:00",
+      "our_miss_km": 3.729,
+      "tca_err_s": 0.0,
+      "miss_err_km": 3.536,
+      "rel_vel_km_s": 14.72
+    },
+    {
+      "pair": "H-2A DEB x UNKNOWN",
+      "their_tca": "2026-09-08T17:20:29.060000+00:00",
+      "their_miss_km": 0.029,
+      "our_tca": "2026-09-08T17:19:56.060000+00:00",
+      "our_miss_km": 16.029,
+      "tca_err_s": -33.0,
+      "miss_err_km": 16.0,
+      "rel_vel_km_s": 15.13
+    },
+    {
+      "pair": "DELTA 1 DEB x FENGYUN 1C DEB",
+      "their_tca": "2026-09-08T17:44:11.010000+00:00",
+      "their_miss_km": 0.082,
+      "our_tca": "2026-09-08T17:44:08.010000+00:00",
+      "our_miss_km": 4.071,
+      "tca_err_s": -3.0,
+      "miss_err_km": 3.989,
+      "rel_vel_km_s": 14.59
+    },
+    {
+      "pair": "CZ-11 R/B x FENGYUN 1C DEB",
+      "their_tca": "2026-09-08T18:12:01.361000+00:00",
+      "their_miss_km": 0.343,
+      "our_tca": "2026-09-08T18:11:59.361000+00:00",
+      "our_miss_km": 17.592,
+      "tca_err_s": -2.0,
+      "miss_err_km": 17.249,
+      "rel_vel_km_s": 13.02
+    },
+    {
+      "pair": "CZ-6A DEB x REX 2",
+      "their_tca": "2026-09-08T19:27:53.285000+00:00",
+      "their_miss_km": 0.351,
+      "our_tca": "2026-09-08T19:27:47.285000+00:00",
+      "our_miss_km": 101.052,
+      "tca_err_s": -6.0,
+      "miss_err_km": 100.701,
+      "rel_vel_km_s": 2.89
+    },
+    {
+      "pair": "CZ-6A DEB x SL-16 DEB",
+      "their_tca": "2026-09-08T20:11:12.141000+00:00",
+      "their_miss_km": 0.056,
+      "our_tca": "2026-09-08T20:11:11.141000+00:00",
+      "our_miss_km": 2.009,
+      "tca_err_s": -1.0,
+      "miss_err_km": 1.953,
+      "rel_vel_km_s": 10.55
+    }
+  ]
+}

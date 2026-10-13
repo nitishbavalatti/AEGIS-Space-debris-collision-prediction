@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 
-export default function TopBar({ connected, sensorSource, debrisCount, currentRisk, solarAlert }) {
+export default function TopBar({ connected, sensorSource, sensorDetail = null, debrisCount, currentRisk, solarAlert, conjunctionCount = 0, conjunctionAlert = null, conjunctionScanning = false, onOpenConjunctions }) {
   const [time, setTime] = useState(new Date());
 
   useEffect(() => {
@@ -111,6 +111,22 @@ export default function TopBar({ connected, sensorSource, debrisCount, currentRi
       )}
 
       <div style={{ display: "flex", alignItems: "center", gap: 24 }}>
+        {/* Conjunction timeline pop-up trigger */}
+        {onOpenConjunctions && (
+          <button
+            onClick={onOpenConjunctions}
+            style={{
+              background: "none", cursor: "pointer",
+              border: `1px solid ${conjunctionAlert === "RED" ? "var(--red)" : conjunctionAlert === "AMBER" ? "var(--amber)" : "var(--panel-border)"}`,
+              borderRadius: 2, padding: "4px 10px",
+              fontFamily: "var(--font-display)", fontSize: 8, letterSpacing: "0.15em",
+              color: conjunctionAlert === "RED" ? "var(--red)" : conjunctionAlert === "AMBER" ? "var(--amber)" : "var(--text-secondary)",
+            }}
+          >
+            CONJUNCTIONS · {conjunctionScanning ? "SCANNING…" : conjunctionCount}
+          </button>
+        )}
+
         {/* Sensor mode */}
         {(() => {
           const hardwareConnected = sensorSource === "esp32" || sensorSource === "hardware";
@@ -122,7 +138,10 @@ export default function TopBar({ connected, sensorSource, debrisCount, currentRi
                   Sensor
                 </div>
                 <div style={{ fontFamily: "var(--font-display)", fontSize: 9, color: hardwareConnected ? "var(--green)" : "var(--amber)" }}>
-                  {hardwareConnected ? "HARDWARE" : "SIMULATED"}
+                  {!hardwareConnected ? "SIMULATED"
+                    : sensorDetail === "rtlsdr" ? "RTL-SDR ONLY"
+                    : sensorDetail === "esp32+rtlsdr" ? "ESP32 + RTL-SDR"
+                    : "HARDWARE"}
                 </div>
               </div>
             </div>
@@ -152,18 +171,5 @@ export default function TopBar({ connected, sensorSource, debrisCount, currentRi
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
       `}</style>
     </header>
-  );
-}
-
-function Stat({ label, value, color }) {
-  return (
-    <div>
-      <div style={{ fontSize: 8, letterSpacing: "0.15em", color: "var(--text-label)", textTransform: "uppercase" }}>
-        {label}
-      </div>
-      <div style={{ fontFamily: "var(--font-display)", fontSize: 13, fontWeight: 700, color, letterSpacing: "0.05em" }}>
-        {value}
-      </div>
-    </div>
   );
 }

@@ -23,6 +23,7 @@ Why GNN over physics-only?
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import math
+import time
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -63,30 +64,86 @@ NODE_FEATURE_DIM = 12
 EDGE_FEATURE_DIM = 3
 
 
+# ─── Orbital decay model ─────────────────────────────────────────────────────
+# Feature schema version. Bump whenever the meaning of any node feature (or the
+# labels derived from it) changes: checkpoints trained on an older version are
+# rejected by load_model() instead of silently scoring with mismatched inputs.
+#   1 = original linear "decay ∝ BSTAR · altitude" projection (physically wrong:
+#       it made high-altitude, high-BSTAR objects "decay" hundreds of km/month)
+#   2 = exponential-atmosphere drag decay (this file)
+FEATURE_VERSION = 2
+
+_MU_KM3_S2 = 398600.4418
+_R_EARTH_KM = 6378.137
+_SGP4_RHO0 = 0.15696615        # kg/m²/Earth-radius: SGP4's reference density for B*
+
+# Exponential atmosphere (Vallado, "Fundamentals of Astrodynamics", moderate solar
+# activity): (base altitude km, base density kg/m³, scale height km). Approximate —
+# real density varies several-fold with solar activity, which is exactly why this is
+# a coarse *screening feature*, not a re-entry predictor.
+_ATMOSPHERE = (
+    (150, 2.070e-9, 22.523), (180, 5.464e-10, 29.740), (200, 2.789e-10, 37.105),
+    (250, 7.248e-11, 45.546), (300, 2.418e-11, 53.628), (350, 9.518e-12, 53.298),
+    (400, 3.725e-12, 58.515), (450, 1.585e-12, 60.828), (500, 6.967e-13, 63.822),
+    (600, 1.454e-13, 71.835), (700, 3.614e-14, 88.667), (800, 1.170e-14, 124.64),
+    (900, 5.245e-15, 181.05), (1000, 3.019e-15, 268.00),
+)
+_ATM_BASES = [row[0] for row in _ATMOSPHERE]
+
+
+def _air_density(alt_km: float) -> float:
+    """Atmospheric density (kg/m³) at altitude, exponential model."""
+    import bisect
+    h = max(alt_km, _ATM_BASES[0])
+    i = max(0, bisect.bisect_right(_ATM_BASES, h) - 1)
+    base, rho0, scale_h = _ATMOSPHERE[i]
+    return rho0 * math.exp(-(h - base) / scale_h)
+
+
+def _project_altitudes(alt_km: float, bstar: float, days=(7, 15, 30), dt_days: float = 0.5):
+    """
+    Altitude (km) after each horizon in `days`, from drag decay of a circular orbit:
+
+        da/dt = -(Cd·A/m) · ρ(h) · sqrt(μ·a)
+
+    with Cd·A/m recovered from the TLE's B* (B* = ½·(Cd·A/m)·ρ0, ρ0 = 0.15696615 kg/m²/ER).
+    Decay falls off EXPONENTIALLY with altitude, so objects above ~800 km barely move
+    while low, high-drag objects drop quickly. The orbit is treated as circular at the
+    given altitude (callers pass APOAPSIS), which UNDER-estimates decay for eccentric
+    orbits whose perigee is much lower. Returns a tuple aligned with `days`.
+    """
+    horizons = sorted(set(days))
+    if alt_km <= 0 or not bstar:
+        return tuple(alt_km for _ in days)
+
+    cd_a_over_m = 2.0 * abs(bstar) / _SGP4_RHO0            # m²/kg
+    a_m = (_R_EARTH_KM + alt_km) * 1000.0
+    h = alt_km
+    t = 0.0
+    out = {}
+    reentered = False
+    for d in horizons:
+        while t < d - 1e-9 and not reentered:
+            step = min(dt_days, d - t)
+            rho = _air_density(h)
+            da_dt = -cd_a_over_m * rho * math.sqrt(_MU_KM3_S2 * 1e9 * a_m)   # m/s
+            a_m += da_dt * step * 86400.0
+            h = a_m / 1000.0 - _R_EARTH_KM
+            t += step
+            if h <= 120.0:
+                reentered = True
+        out[d] = 100.0 if reentered else h
+    return tuple(out[d] for d in days)
+
+
 def _project_altitude(alt_km: float, bstar: float, days: int) -> float:
     """
-    Estimate altitude after `days` using simplified atmospheric drag decay.
-
-    Uses the Jacchia-Roberts simplified drag model:
-      Δalt ≈ -2π * n * BSTAR * alt * days_in_revs
-    where n is mean motion in rev/day.
-
-    This is approximate but sufficient for 30-day risk window features.
-    Returns normalized altitude (0-1 for 200-2000km range).
+    Altitude after `days` of drag decay, NORMALIZED to 0-1 over 0-2000 km
+    (same contract as the old function so train.py's labels keep working).
+    See _project_altitudes() for the physics and its limits.
     """
-    if alt_km <= 0 or bstar <= 0:
-        return min(alt_km / 2000.0, 1.0)
-
-    # Mean motion at this altitude (rev/day)
-    mu = 398600.4418  # km³/s²
-    r = 6371.0 + alt_km
-    n_rad_s = math.sqrt(mu / r ** 3)
-    n_rev_day = n_rad_s * 86400 / (2 * math.pi)
-
-    # Simplified decay: Δalt per day ≈ -2π * BSTAR * alt * n
-    decay_per_day = 2 * math.pi * bstar * alt_km * n_rev_day
-    projected = max(100.0, alt_km - decay_per_day * days)
-    return min(projected / 2000.0, 1.0)
+    projected = _project_altitudes(alt_km, bstar, (days,))[0]
+    return min(max(projected, 0.0) / 2000.0, 1.0)
 
 
 class DebrisGNN(nn.Module):
@@ -194,9 +251,10 @@ def build_graph_from_tle_data(debris_objects: list[dict], kp_index: float = 0.0)
             age   = min((current_year - launch_year) / 50.0, 1.0)
 
             # ── 30-day projected altitudes ─────────────────────────────────
-            alt_7d  = _project_altitude(alt, abs(bstar), 7)
-            alt_15d = _project_altitude(alt, abs(bstar), 15)
-            alt_30d = _project_altitude(alt, abs(bstar), 30)
+            p7, p15, p30 = _project_altitudes(alt, abs(bstar), (7, 15, 30))
+            alt_7d  = min(max(p7,  0.0) / 2000.0, 1.0)
+            alt_15d = min(max(p15, 0.0) / 2000.0, 1.0)
+            alt_30d = min(max(p30, 0.0) / 2000.0, 1.0)
 
             features = [
                 min(alt / 2000.0, 1.0),             # 0  current alt
@@ -229,6 +287,8 @@ def build_graph_from_tle_data(debris_objects: list[dict], kp_index: float = 0.0)
     INCL_THRESH = 5.0
 
     for i in range(n):
+        if i % 100 == 0:
+            time.sleep(0)   # cooperative yield: under eventlet this keeps the web server responsive
         for j in range(i + 1, n):
             alt_now  = abs(positions[i][0] - positions[j][0])
             incl_diff = abs(positions[i][1] - positions[j][1])
@@ -294,6 +354,22 @@ def load_model(checkpoint_path: str | None = None) -> "DebrisGNN | None":
     except Exception as e:
         print(f"[GNN] Checkpoint load failed ({checkpoint_path}): {e} — "
               f"GNN disabled, using heuristic fallback")
+        return None
+
+    # New-format checkpoints are {"feature_version": int, "state_dict": {...}}.
+    # Legacy checkpoints are a bare state_dict, trained BEFORE the decay model was
+    # fixed (feature version 1) — their projected-altitude inputs and trajectory
+    # labels meant something different, so they must not score today's features.
+    if isinstance(state, dict) and "state_dict" in state:
+        ckpt_version = state.get("feature_version", 1)
+        state = state["state_dict"]
+    else:
+        ckpt_version = 1
+    if ckpt_version != FEATURE_VERSION:
+        print(f"[GNN] Checkpoint was trained with feature version {ckpt_version}, "
+              f"model expects {FEATURE_VERSION} (decay model changed) — retraining "
+              f"needed. GNN disabled, using heuristic fallback until retrained "
+              f"(run: python -m backend.gnn.train)")
         return None
 
     # Handle checkpoint trained with an older feature schema (e.g. the

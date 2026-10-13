@@ -270,10 +270,29 @@ class HardwareSensor:
 
     # 🔥 RTL-SDR PROCESSOR
     def _read_rtl(self):
-        BASELINE_DBFS = -45.0
+        BASELINE_DBFS = -45.0      # fallback only (no device / not calibrated)
+        RF_WARMUP_DISCARD = 5      # first readings after start are unstable (the
+                                   # very first one read ~-19 dBFS -> false SEVERE)
+        RF_CAL_SAMPLES = 30        # then calibrate the baseline from the next 30
 
         noise_dbfs = self._get_rf_noise()
-        delta_dbfs = noise_dbfs - BASELINE_DBFS
+        calibrating = False
+        if self.sdr:
+            seen = getattr(self, "_rf_seen", 0) + 1
+            self._rf_seen = seen
+            if getattr(self, "_rf_cal", None) is None:
+                self._rf_cal = []
+            if seen > RF_WARMUP_DISCARD and len(self._rf_cal) < RF_CAL_SAMPLES:
+                self._rf_cal.append(noise_dbfs)
+            if len(self._rf_cal) >= RF_CAL_SAMPLES:
+                # median of THIS antenna's own quiet noise floor, fixed for the session
+                BASELINE_DBFS = float(np.median(self._rf_cal))
+            else:
+                calibrating = True
+
+        # While warming up / calibrating there is no valid baseline: report
+        # delta 0 and NONE instead of a bogus storm.
+        delta_dbfs = 0.0 if calibrating else noise_dbfs - BASELINE_DBFS
 
         if delta_dbfs > 24:
             alert = "SEVERE"
@@ -287,7 +306,10 @@ class HardwareSensor:
             alert = "NONE"
 
         storm_detected = bool(delta_dbfs > 8)
-        data_source = "REAL" if self.sdr else "PLACEHOLDER (device not connected)"
+        data_source = (
+            "REAL (calibrating baseline)" if (self.sdr and calibrating)
+            else "REAL" if self.sdr else "PLACEHOLDER (device not connected)"
+        )
 
         rf_data = {
             "noise_dbm": float(noise_dbfs),
@@ -526,18 +548,20 @@ class HardwareSensor:
                         self.history[-1]["rf"] = rf_data
                         self.emit(self.history[-1])
                     else:
-                        # No mag reading yet (ESP32 not connected, USGS
-                        # fallback hasn't ticked yet) — don't fabricate a
-                        # reading with empty mag data, that bakes a fake
-                        # zero point into the chart at whatever moment this
-                        # thread happens to race the USGS backfill on
-                        # startup. Just cache the RF value; _merge_reading()
-                        # and _external_mag_loop() already pick it up via
-                        # self._latest_rf on the next real mag tick.
-                        logger.debug(
-                            "[HW Sensor] RTL-SDR reading cached — waiting on first "
-                            "mag reading (ESP32 or USGS fallback) before emitting"
-                        )
+                        # No mag reading yet (ESP32 not connected, and the USGS
+                        # fallback hasn't succeeded). This used to emit NOTHING, so
+                        # the RF Monitor sat on "WAITING FOR DATA" for as long as
+                        # USGS was unreachable even though the dongle was reading
+                        # fine. Emit an RF-ONLY reading: no `mag` key at all (so the
+                        # frontend can't plot a fake zero point) and it is NOT added
+                        # to self.history (so it never seeds the mag backfill).
+                        self.emit({
+                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "tick": int(time.time()),
+                            "source": "rtlsdr",
+                            "rf": rf_data,
+                            "hardware_status": {"esp32": False, "rtlsdr": True},
+                        })
 
                     logger.info(
                         f"[RTL-SDR] noise={rf_data['noise_dbm']:.2f} "

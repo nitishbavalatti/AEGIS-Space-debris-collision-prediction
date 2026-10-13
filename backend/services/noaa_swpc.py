@@ -3,7 +3,9 @@ NOAA SWPC (Space Weather Prediction Center) service.
 """
 
 import re
+import time
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 
 import requests
@@ -15,7 +17,19 @@ logger = logging.getLogger(__name__)
 
 NOAA_KP_URL     = "https://services.swpc.noaa.gov/json/planetary_k_index_1m.json"
 NOAA_FLARES_URL = "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-7-day.json"
-NOAA_CME_URL    = "https://services.swpc.noaa.gov/json/DONKI/CME.json"
+# CMEs come from NASA's DONKI service, NOT NOAA — services.swpc.noaa.gov/json/DONKI/CME.json
+# is a 404, so the CME count could never populate.
+# Primary: CCMC's own DONKI web service (no API key). Fallback: the api.nasa.gov gateway,
+# which needs Config.NASA_API_KEY ("DEMO_KEY" is rate-limited) and was observed redirecting
+# to a CCMC notice page instead of returning JSON.
+def _cme_urls(days_back: int) -> list[str]:
+    end = datetime.now(timezone.utc).date()
+    start = end - timedelta(days=max(1, days_back))
+    gateway = getattr(Config, "NASA_DONKI_URL", "https://api.nasa.gov/DONKI")
+    return [
+        f"https://kauai.ccmc.gsfc.nasa.gov/DONKI/WS/get/CME?startDate={start}&endDate={end}",
+        f"{gateway}/CME?startDate={start}&endDate={end}&api_key={Config.NASA_API_KEY}",
+    ]
 
 # Real-time interplanetary magnetic field (L1 spacecraft), no API key required.
 #
@@ -138,13 +152,17 @@ def _parse_kp(item: dict) -> float:
 
 
 def _kp_to_level(kp: float) -> str:
-    if kp >= 7.0:
+    # NOAA G-scale: G1 (minor storm) starts at Kp 5, G2 (moderate) Kp 6,
+    # G3 (strong) Kp 7, G4-G5 (severe/extreme) Kp 8-9. The old mapping was
+    # shifted down a step and called Kp 3 a "MINOR storm", so the dashboard
+    # showed SOLAR STORM DETECTED on ordinary unsettled conditions.
+    if kp >= 8.0:
         return "SEVERE"
-    if kp >= 6.0:
+    if kp >= 7.0:
         return "STRONG"
-    if kp >= 5.0:
+    if kp >= 6.0:
         return "MODERATE"
-    if kp >= 3.0:
+    if kp >= 5.0:
         return "MINOR"
     return "NONE"
 
@@ -156,8 +174,96 @@ def _fetch_json(url: str, timeout: int = 20) -> list | None:
         data = resp.json()
         return data if isinstance(data, list) else []
     except Exception as e:
-        print(f"[NOAA] Fetch failed {url}: {e}")
+        safe_url = re.sub(r"api_key=[^&]+", "api_key=***", url)       # never log the key
+        safe_err = re.sub(r"api_key=[^&\s)]+", "api_key=***", str(e))
+        print(f"[NOAA] Fetch failed {safe_url}: {safe_err}")
         return None
+
+
+# ── Shared, single-flight, stale-while-revalidate download cache ──────────────
+# Before: every caller (solar summary, correlation chart, GNN Kp lookup, ...) made
+# its OWN request — the same geomag/Kp/flare file was downloaded 2-4 times at once
+# on a cold start, a failing URL was retried by every caller (each waiting out the
+# full timeout), and any cache miss made the dashboard wait for the network.
+#   - one download per URL, shared by all callers (single-flight)
+#   - fresh within `ttl`           -> returned immediately
+#   - older but < max_stale        -> returned immediately, refreshed in background
+#   - a failed fetch is remembered for `neg_ttl` s, so a down/slow network costs
+#     one timeout per window instead of one per caller
+_RAW: dict[str, dict] = {}
+_RAW_LOCK = threading.Lock()
+_URL_LOCKS: dict[str, threading.Lock] = {}
+_REFRESHING: set[str] = set()
+
+
+def _raw_store(url: str, data) -> None:
+    with _RAW_LOCK:
+        ent = _RAW.setdefault(url, {"data": None, "t": 0.0, "fail_t": 0.0})
+        if data is None:
+            ent["fail_t"] = time.time()          # keep any older good data
+        else:
+            ent["data"], ent["t"], ent["fail_t"] = data, time.time(), 0.0
+
+
+def _refresh_async(url: str, timeout: int) -> None:
+    with _RAW_LOCK:
+        if url in _REFRESHING:
+            return
+        _REFRESHING.add(url)
+
+    def work():
+        try:
+            _raw_store(url, _fetch_json(url, timeout))
+        finally:
+            with _RAW_LOCK:
+                _REFRESHING.discard(url)
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _fetch_cached(url: str, ttl: float, timeout: int = 20, neg_ttl: float = 45.0):
+    """Cached download of a JSON list. Returns the list, or None if there is
+    nothing usable (never fetched successfully, or too stale, and the fetch failed)."""
+    max_stale = max(3600.0, 4 * ttl)
+    with _RAW_LOCK:
+        ent = _RAW.get(url)
+        lock = _URL_LOCKS.setdefault(url, threading.Lock())
+    now = time.time()
+
+    if ent and ent["data"] is not None:
+        age = now - ent["t"]
+        if age < ttl:
+            return ent["data"]
+        if age < max_stale:
+            if now - ent["fail_t"] >= neg_ttl:            # don't hammer a failing source
+                _refresh_async(url, timeout)
+            return ent["data"]                            # serve stale, never make the UI wait
+    if ent and now - ent["fail_t"] < neg_ttl:
+        return None                                       # failed recently: fail fast
+
+    with lock:                                            # single-flight
+        with _RAW_LOCK:
+            ent = _RAW.get(url)
+        now = time.time()
+        if ent and ent["data"] is not None and now - ent["t"] < ttl:
+            return ent["data"]                            # someone else just fetched it
+        if ent and now - ent["fail_t"] < neg_ttl:
+            return None
+        data = _fetch_json(url, timeout)
+        _raw_store(url, data)
+        return data
+
+
+def warm_cache() -> None:
+    """Prefetch everything the dashboard asks for on first load, so the Solar
+    Weather / Correlation panels don't wait on a cold start. Safe to call from a
+    background thread; every call is cached and failure-tolerant."""
+    for fn in (lambda: get_kp_history(1), lambda: get_kp_history(2),
+               lambda: get_solar_summary(7), lambda: get_geomag_realtime(1440)):
+        try:
+            fn()
+        except Exception as e:
+            print(f"[NOAA] warm-up step failed: {e}")
 
 
 def _filter_by_days(items: list[dict], days_back: int) -> list[dict]:
@@ -187,7 +293,7 @@ def get_kp_history(days_back: int = 7) -> tuple[list[dict], bool]:
     hit = cache.get(cache_key)
     if hit is not None:
         return hit, True
-    data = _fetch_json(NOAA_KP_URL)
+    data = _fetch_cached(NOAA_KP_URL, ttl=300)
     if data is None:
         return [], False
     recent = _filter_by_days(data, days_back)
@@ -201,17 +307,14 @@ def get_flare_summary(days_back: int = 7) -> dict:
     hit = cache.get(cache_key)
     if hit is not None:
         return hit
-    raw = _fetch_json(NOAA_FLARES_URL)
+    raw = _fetch_cached(NOAA_FLARES_URL, ttl=600)
     if raw is None:
         return {"ok": False, "flares": [], "total": 0, "x_class": 0, "m_class": 0}
-    if raw:
-        print("[NOAA] Flare keys:", list(raw[0].keys()))
-        print("[NOAA] Flare sample:", raw[0])
     recent = _filter_by_days(raw, days_back)
     x_class = sum(1 for f in recent if _get_flare_class(f).startswith("X"))
     m_class = sum(1 for f in recent if _get_flare_class(f).startswith("M"))
     formatted = sorted(
-        [{"classType": _get_flare_class(f) or "—", "peakTime": f.get("peak_time") or f.get("begin_time") or ""} for f in recent],
+        [{"classType": _get_flare_class(f) or "—", "peakTime": f.get("peak_time") or f.get("max_time") or f.get("begin_time") or ""} for f in recent],
         key=lambda f: f["peakTime"], reverse=True,
     )
     result = {"ok": True, "flares": formatted, "total": len(recent), "x_class": x_class, "m_class": m_class}
@@ -224,12 +327,13 @@ def get_cme_summary(days_back: int = 7) -> dict:
     hit = cache.get(cache_key)
     if hit is not None:
         return hit
-    raw = _fetch_json(NOAA_CME_URL)
+    raw = None
+    for url in _cme_urls(days_back):
+        raw = _fetch_cached(url, ttl=1800, timeout=15, neg_ttl=300)
+        if raw is not None:
+            break
     if raw is None:
         return {"ok": False, "cmes": [], "total": 0}
-    if raw:
-        print("[NOAA] CME keys:", list(raw[0].keys()))
-        print("[NOAA] CME sample:", raw[0])
     recent = _filter_by_days(raw, days_back)
     formatted = sorted(
         [{"startTime": c.get("startTime") or c.get("begin_time") or c.get("time_tag") or "",
@@ -301,12 +405,8 @@ def get_geomag_realtime(minutes_back: int = 180) -> list[dict]:
     if hit is not None:
         return hit
 
-    try:
-        resp = requests.get(NOAA_MAG_URL, timeout=15)
-        resp.raise_for_status()
-        rows = resp.json()
-    except Exception as e:
-        print(f"[NOAA] geomag fetch failed: {e}")
+    rows = _fetch_cached(NOAA_MAG_URL, ttl=55, timeout=15)
+    if rows is None:
         return []
 
     if not rows:
@@ -520,4 +620,6 @@ def clear_noaa_cache() -> None:
                 "noaa:geomag:15", "noaa:geomag:60", "noaa:geomag:180",
                 "noaa:geomag:1440"]:
         cache.delete(key)
+    with _RAW_LOCK:
+        _RAW.clear()
     print("[NOAA] Cache cleared")

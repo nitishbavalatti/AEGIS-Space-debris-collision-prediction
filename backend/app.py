@@ -18,10 +18,10 @@ from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 
+from backend.config import Config   # loads .env first, so buzzer_alert sees MQTT_BROKER
 from backend.routes.conjunction import conjunction_bp
 from backend.buzzer_alert import init_buzzer
 init_buzzer()
-from backend.config import Config
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
@@ -98,6 +98,18 @@ def health():
     })
 
 
+def _sensor_detail(state) -> str:
+    """Which sensors are actually connected, so the top bar doesn't say HARDWARE
+    when only the RTL-SDR dongle is attached (no ESP32 / magnetometer)."""
+    sensor = state.get("mock_sensor")
+    esp = bool(getattr(sensor, "esp32_connected", False))
+    rtl = bool(getattr(sensor, "rtlsdr_connected", False))
+    if esp and rtl: return "esp32+rtlsdr"
+    if esp:         return "esp32"
+    if rtl:         return "rtlsdr"
+    return "mock" if Config.USE_MOCK_SENSOR else "none"
+
+
 # ─── WebSocket events ─────────────────────────────────────────────────────────
 @socketio.on("connect")
 def on_connect():
@@ -108,6 +120,9 @@ def on_connect():
         "debris_count": len(state.get("debris_objects", [])),
         "risk_score": state.get("current_risk_score", 0),
         "sensor_source": "mock" if Config.USE_MOCK_SENSOR else "hardware",
+        "debris_stage": state.get("debris_stage"),
+        "is_mock_data": bool(state.get("debris_is_mock")),
+        "sensor_detail": _sensor_detail(state),
     })
 
 
@@ -198,7 +213,11 @@ def init_app():
         from backend.gnn.model import load_model
         model = load_model(checkpoint_path="gnn/aegis_gnn.pt")
         state["gnn_model"] = model
-        logger.info("[Init] GNN model loaded")
+        if model is not None:
+            logger.info("[Init] GNN model loaded")
+        else:
+            logger.warning("[Init] GNN NOT loaded (missing/incompatible checkpoint) — "
+                           "objects will use heuristic scoring. Retrain: python -m backend.gnn.train")
     except Exception as e:
         logger.warning(f"[Init] GNN not loaded: {e} — using fallback scoring")
 
@@ -228,23 +247,26 @@ def init_app():
             state["mock_sensor"] = sensor
             logger.info("[Init] Mock sensor started (fallback)")
 
-    # 3. Pre-load debris to ensure initial data is available
-    try:
-        from backend.tasks import _generate_mock_debris, _score_debris
-        # Always pre-load mock debris for fast initial load, regardless of data mode
-        logger.info("[Init] Pre-loading 500 mock debris objects for initial display...")
-        debris = _generate_mock_debris(500)
-        debris = _score_debris(debris)
-        state["debris_objects"] = debris
-        scores = sorted([o.get("risk_score", 0) for o in debris], reverse=True)
-        top10 = scores[:max(1, len(scores)//10)]
-        state["current_risk_score"] = round(sum(top10) / len(top10), 1)
-        logger.info(f"[Init] Mock debris pre-loaded. Top risk: {scores[0]:.1f}")
-        
-        if getattr(Config, 'DATA_MODE', 'REAL') == 'REAL':
-            logger.info("[Init] REAL data mode — background tasks will update with Space-Track data")
-    except Exception as e:
-        logger.warning(f"[Init] Debris pre-load failed: {e}")
+    # 3. Initial debris
+    # REAL mode: start EMPTY. The pipeline publishes real objects within seconds
+    # (immediately if the on-disk TLE cache is fresh) and the dashboard refetches
+    # on the "debris_updated" event. The old code pre-loaded 500 *fake* objects
+    # with realistic names, which looked real and was what stayed on screen.
+    # MOCK mode: pre-load demo objects as before.
+    if getattr(Config, "DATA_MODE", "REAL") == "MOCK":
+        try:
+            from backend.tasks import _generate_mock_debris, _score_debris
+            logger.info("[Init] MOCK data mode — pre-loading 500 demo debris objects...")
+            debris = _score_debris(_generate_mock_debris(500))
+            state["debris_objects"] = debris
+            state["debris_is_mock"] = True
+            scores = sorted([o.get("risk_score", 0) for o in debris], reverse=True)
+            top10 = scores[:max(1, len(scores)//10)]
+            state["current_risk_score"] = round(sum(top10) / len(top10), 1)
+        except Exception as e:
+            logger.warning(f"[Init] Debris pre-load failed: {e}")
+    else:
+        logger.info("[Init] REAL data mode — waiting for the debris pipeline (no placeholder objects)")
 
     # 4. Start background tasks (TLE fetch + ISS updater)
     from backend.tasks import start_background_tasks

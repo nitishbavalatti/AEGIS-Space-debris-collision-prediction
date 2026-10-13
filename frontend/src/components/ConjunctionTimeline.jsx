@@ -19,42 +19,26 @@ const ALERT_DOT = {
   YELLOW: "amber",
 };
 
-function TCACountdown({ tcaHours }) {
-  const [display, setDisplay] = useState("");
+const eventKey = (c) =>
+  `${c._type}:${c.norad_id}:${c.norad_id_b ?? ""}:${c.tca ?? ""}`;
 
+// Counts down to the absolute TCA timestamp, so it neither drifts nor
+// resets to a stale value when the conjunction list refreshes.
+function TCACountdown({ tca, tcaHours }) {
+  const [now, setNow] = useState(Date.now());
   useEffect(() => {
-    function fmt() {
-      const totalSec = Math.max(0, Math.round(tcaHours * 3600));
-      if (totalSec <= 0) return "NOW";
-      const h = Math.floor(totalSec / 3600);
-      const m = Math.floor((totalSec % 3600) / 60);
-      const s = totalSec % 60;
-      return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-    }
-
-    // Subtract elapsed time each second
-    const startMs  = Date.now();
-    const startSec = tcaHours * 3600;
-
-    const tick = () => {
-      const elapsed = (Date.now() - startMs) / 1000;
-      const remaining = Math.max(0, startSec - elapsed);
-      const h = Math.floor(remaining / 3600);
-      const m = Math.floor((remaining % 3600) / 60);
-      const s = Math.floor(remaining % 60);
-      if (remaining <= 0) {
-        setDisplay("NOW");
-      } else {
-        setDisplay(`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`);
-      }
-    };
-
-    tick();
-    const id = setInterval(tick, 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [tcaHours]);
-
-  return <span>{display}</span>;
+  }, []);
+  const tcaMs = tca ? Date.parse(tca) : NaN;
+  const remaining = Number.isFinite(tcaMs)
+    ? Math.max(0, (tcaMs - now) / 1000)
+    : Math.max(0, (tcaHours ?? 0) * 3600);
+  if (remaining <= 0) return <span>NOW</span>;
+  const h = Math.floor(remaining / 3600);
+  const m = Math.floor((remaining % 3600) / 60);
+  const sec = Math.floor(remaining % 60);
+  return <span>{`${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`}</span>;
 }
 
 export default function ConjunctionTimeline({ conjunctions, lastScreened, isLoading }) {
@@ -66,7 +50,7 @@ export default function ConjunctionTimeline({ conjunctions, lastScreened, isLoad
     if (!conjunctions?.length) return;
     const first = conjunctions[0];
     if (first?.alert === "RED") {
-      setSelectedId(first.norad_id);
+      setSelectedId(eventKey(first));
     }
   }, [conjunctions]);
 
@@ -141,13 +125,14 @@ export default function ConjunctionTimeline({ conjunctions, lastScreened, isLoad
 
         {(conjunctions ?? []).map((event, i) => {
           const color    = ALERT_COLOR[event.alert] ?? "var(--text-dim)";
-          const isSel    = selectedId === event.norad_id;
+          const key      = eventKey(event);
+          const isSel    = selectedId === key;
           const isMock   = event._is_mock;
 
           return (
             <div
-              key={event.norad_id + i}
-              onClick={() => setSelectedId(isSel ? null : event.norad_id)}
+              key={eventKey(event)}
+              onClick={() => setSelectedId(isSel ? null : key)}
               style={{
                 padding: "7px 10px",
                 borderBottom: "1px solid var(--panel-border)",
@@ -164,7 +149,7 @@ export default function ConjunctionTimeline({ conjunctions, lastScreened, isLoad
                   color: isSel ? color : "var(--text-primary)",
                   flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>
-                  {event.object_name}
+                  {event.object_name}{event.object_name_b ? ` × ${event.object_name_b}` : ""}
                   {isMock && (
                     <span style={{ fontSize: 7, color: "var(--text-dim)", marginLeft: 4 }}>
                       [MOCK]
@@ -212,7 +197,7 @@ export default function ConjunctionTimeline({ conjunctions, lastScreened, isLoad
                     fontSize: 11, fontWeight: 700,
                     color: "var(--cyan)", letterSpacing: "0.05em",
                   }}>
-                    <TCACountdown tcaHours={event.tca_hours} />
+                    <TCACountdown tca={event.tca} tcaHours={event.tca_hours} />
                   </div>
                   <div style={{ fontSize: 7, color: "var(--text-dim)", marginTop: 1 }}>
                     TCA COUNTDOWN

@@ -5,22 +5,10 @@ import { useState, useEffect, useRef } from "react";
 // firing "aegis:scoresReady".  We never compute scores here independently.
 import { scoreDebrisObject, scoreToColor, scoreToLabel } from "./Globe";
 
-// ── Fallback mock data (only used when no real data arrives) ─────────────────
-const MOCK_DEBRIS = [
-  { NORAD_CAT_ID:"25544", OBJECT_NAME:"ISS DEB (BOLT)",         APOAPSIS:408,  INCLINATION:51.6, ECCENTRICITY:0.0003, COUNTRY_CODE:"US",  LAUNCH_YEAR:1998 },
-  { NORAD_CAT_ID:"41332", OBJECT_NAME:"COSMOS 2504 DEB",        APOAPSIS:385,  INCLINATION:64.9, ECCENTRICITY:0.012,  COUNTRY_CODE:"CIS", LAUNCH_YEAR:2015 },
-  { NORAD_CAT_ID:"38778", OBJECT_NAME:"FENGYUN 1C DEB",         APOAPSIS:841,  INCLINATION:98.8, ECCENTRICITY:0.003,  COUNTRY_CODE:"PRC", LAUNCH_YEAR:2007 },
-  { NORAD_CAT_ID:"22675", OBJECT_NAME:"IRIDIUM 33 DEB",         APOAPSIS:776,  INCLINATION:86.4, ECCENTRICITY:0.008,  COUNTRY_CODE:"US",  LAUNCH_YEAR:1997 },
-  { NORAD_CAT_ID:"36036", OBJECT_NAME:"SL-16 R/B DEB",          APOAPSIS:320,  INCLINATION:71.0, ECCENTRICITY:0.021,  COUNTRY_CODE:"CIS", LAUNCH_YEAR:1993 },
-  { NORAD_CAT_ID:"43641", OBJECT_NAME:"BREEZE-M DEB",           APOAPSIS:290,  INCLINATION:48.9, ECCENTRICITY:0.031,  COUNTRY_CODE:"CIS", LAUNCH_YEAR:2018 },
-  { NORAD_CAT_ID:"19046", OBJECT_NAME:"COSMOS 1408 DEB",        APOAPSIS:495,  INCLINATION:82.5, ECCENTRICITY:0.005,  COUNTRY_CODE:"CIS", LAUNCH_YEAR:1982 },
-  { NORAD_CAT_ID:"31595", OBJECT_NAME:"H-2A R/B DEB",           APOAPSIS:602,  INCLINATION:98.1, ECCENTRICITY:0.002,  COUNTRY_CODE:"JPN", LAUNCH_YEAR:2007 },
-  { NORAD_CAT_ID:"28903", OBJECT_NAME:"MICROSAT-R DEB",         APOAPSIS:447,  INCLINATION:97.4, ECCENTRICITY:0.007,  COUNTRY_CODE:"IND", LAUNCH_YEAR:2019 },
-  { NORAD_CAT_ID:"41240", OBJECT_NAME:"TITAN 3C TRANSTAGE DEB", APOAPSIS:330,  INCLINATION:33.1, ECCENTRICITY:0.019,  COUNTRY_CODE:"US",  LAUNCH_YEAR:1968 },
-];
-
-export default function ThreatFeed({ topThreats, loadMoreDebris }) {
-  const source = topThreats?.length > 0 ? topThreats : MOCK_DEBRIS;
+export default function ThreatFeed({ topThreats, loadMoreDebris, isMock = false }) {
+  // No hard-coded placeholder rows: before the backend has data this shows
+  // "AWAITING DATA STREAM" rather than invented objects that look real.
+  const source = topThreats ?? [];
 
   const [hoveredId,   setHoveredId]   = useState(null);
   const [selectedId,  setSelectedId]  = useState(null);
@@ -84,6 +72,7 @@ export default function ThreatFeed({ topThreats, loadMoreDebris }) {
         <div className="status-dot red" />
         <span className="panel-title">Active Threat Feed</span>
         <span style={{ marginLeft:"auto", fontFamily:"var(--font-mono)", fontSize:9, color:"var(--text-dim)" }}>
+          {isMock && <span style={{ color:"var(--amber)", marginRight:6 }}>DEMO DATA ·</span>}
           TOP {rows.length} OBJECTS
         </span>
       </div>

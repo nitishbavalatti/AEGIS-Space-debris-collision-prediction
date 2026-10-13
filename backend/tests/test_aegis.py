@@ -29,26 +29,15 @@ class TestMockSensor:
 
     def test_reading_has_required_keys(self):
         sensor, _ = self._make_sensor()
-        # Force one reading
         sensor._tick = 0
         sensor._storm_active = False
-        reading = sensor._generate_reading()
-        assert "timestamp" in reading
-        assert "mag" in reading
-        assert "rf" in reading
-        assert "solar" in reading
-        assert "source" in reading
 
-    def test_mag_has_bxyz(self):
-        sensor, _ = self._make_sensor()
         reading = sensor._generate_reading()
-        mag = reading["mag"]
-        assert "bx" in mag
-        assert "by" in mag
-        assert "bz" in mag
-        assert "total" in mag
-        # Total field should be positive
-        assert mag["total"] > 0
+
+        assert "timestamp" in reading
+        assert "source" in reading
+        assert "rf" in reading
+        assert "tick" in reading
 
     def test_rf_noise_is_float(self):
         sensor, _ = self._make_sensor()
@@ -73,19 +62,17 @@ class TestMockSensor:
         assert sensor._storm_active is True
         assert sensor._storm_intensity > 0
 
-    def test_storm_spike_raises_mag(self):
+    def test_storm_detection_in_rf(self):
         sensor, _ = self._make_sensor()
-        # Reading with no storm
-        sensor._storm_active = False
-        quiet = sensor._generate_reading()
-        # Reading with severe storm
         sensor._storm_active = True
         sensor._storm_intensity = 1.0
         sensor._storm_remaining_ticks = 100
-        sensor._tick = 10  # past ramp-up
-        storm = sensor._generate_reading()
-        # Storm total field should be higher than quiet
-        assert storm["mag"]["total"] > quiet["mag"]["total"]
+        sensor._tick = 10
+
+        reading = sensor._generate_reading()
+
+        assert "rf" in reading
+        assert reading["rf"]["storm_detected"] is True
 
     def test_history_stores_readings(self):
         sensor, _ = self._make_sensor()
@@ -129,7 +116,8 @@ class TestGNNModel:
             graph = build_graph_from_tle_data(self.SAMPLE_DEBRIS, kp_index=2.0)
             assert graph is not None
             assert graph.x.shape[0] == len(self.SAMPLE_DEBRIS)
-            assert graph.x.shape[1] == 9  # NODE_FEATURE_DIM
+            from backend.gnn.model import NODE_FEATURE_DIM
+            assert graph.x.shape[1] == NODE_FEATURE_DIM  # 12
         except ImportError:
             pytest.skip("torch not available")
 
@@ -157,12 +145,33 @@ class TestGNNModel:
         except ImportError:
             pytest.skip("torch not available")
 
-    def test_predict_risk_returns_scores(self):
+    def test_load_model_without_checkpoint_returns_none(self):
         try:
-            from backend.gnn.model import load_model, predict_risk, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import load_model, TORCH_GEOMETRIC_AVAILABLE
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
-            model = load_model(checkpoint_path=None)
+            assert load_model(checkpoint_path=None) is None
+        except ImportError:
+            pytest.skip("torch not available")
+
+    def test_predict_risk_passthrough_when_model_none(self):
+        try:
+            from backend.gnn.model import predict_risk
+            debris = [dict(d) for d in self.SAMPLE_DEBRIS]
+            result = predict_risk(None, debris)
+            assert all("risk_score" not in o for o in result)
+        except ImportError:
+            pytest.skip("torch not available")
+
+    def test_predict_risk_returns_scores(self):
+        try:
+            from backend.gnn.model import DebrisGNN, predict_risk, TORCH_GEOMETRIC_AVAILABLE
+            if not TORCH_GEOMETRIC_AVAILABLE:
+                pytest.skip("torch-geometric not installed")
+            # load_model(None) intentionally returns None now (no silent
+            # untrained model), so build the network directly for this
+            # schema/range test.
+            model = DebrisGNN().eval()
             debris = [dict(d) for d in self.SAMPLE_DEBRIS]
             result = predict_risk(model, debris, kp_index=2.0)
             for obj in result:

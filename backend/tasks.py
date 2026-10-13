@@ -4,6 +4,7 @@ AEGIS Background Tasks
 import threading
 import time
 import logging
+from datetime import datetime, timezone
 from backend.config import Config
 from backend.buzzer_alert import publish_buzzer_state
 from backend.services import risk_history
@@ -26,139 +27,269 @@ def _get_apoapsis(obj: dict) -> float:
         return 0.0
     
 
-def _get_live_kp() -> float:
+def _run_blocking(fn, *args, **kwargs):
     """
-    Real geomagnetic Kp index from NOAA SWPC — the same source that feeds
-    the Solar Storm correlation panel on the dashboard.
-
-    Previously this pipeline pulled Kp from `mock_sensor.get_latest()`
-    instead, which is a completely different (simulated) signal from
-    what the frontend chart displays as "live" Kp. With
-    USE_MOCK_SENSOR=false and no hardware attached, that path never
-    populates at all and silently fell back to a hardcoded 2.0 on every
-    single pipeline run — meaning the GNN's solar_kp_proxy feature (#7)
-    was effectively never responding to real solar weather, regardless
-    of what the dashboard showed. Pulling from get_solar_summary()
-    (same call the /api/solar/summary route uses, and it's cached with
-    a 30-min TTL — see noaa_swpc.py) makes the number the GNN scores
-    against match the number the user is looking at.
-
-    Falls back to 2.0 (quiet baseline) only if NOAA is genuinely
-    unreachable, so a transient outage can't crash the pipeline.
+    Run CPU-heavy work (conjunction screening, GNN graph build/inference) in a
+    REAL OS thread. app.py calls eventlet.monkey_patch(), which turns every
+    threading.Thread into a cooperative greenlet: numpy/torch never yield, so a
+    heavy call made directly froze the web server, the socket connection (the
+    dashboard flipped to OFFLINE) and the sensor loop until it finished — over a
+    minute for the D×D screener. tpool.execute runs it in a native thread and
+    keeps the event loop serving.
     """
     try:
-        from backend.services.noaa_swpc import get_solar_summary
-        solar = get_solar_summary(days_back=1)
-        kp = solar.get("max_kp_index")
-        if kp is not None:
-            return float(kp)
+        from eventlet import tpool
+    except ImportError:
+        return fn(*args, **kwargs)
+    return tpool.execute(fn, *args, **kwargs)
+
+
+def _get_live_kp() -> float:
+    """
+    Real geomagnetic Kp from NOAA SWPC (same source as the dashboard's solar
+    panel), for the GNN's solar_kp_proxy feature.
+
+    Uses ONLY the Kp feed. This used to call get_solar_summary(), which also
+    fetches flares, CMEs and geomag one after another — each with a 15-20 s
+    timeout — so on a slow/blocked NOAA connection the debris pipeline sat for
+    over a minute before showing anything. It is now called only AFTER the
+    debris has already been published, so a slow NOAA can delay the GNN
+    refinement but never the debris appearing.
+
+    Falls back to 2.0 (quiet baseline) if NOAA is unreachable.
+    """
+    try:
+        from backend.services.noaa_swpc import get_kp_history, _parse_kp
+        events, ok = get_kp_history(days_back=1)
+        if ok and events:
+            return float(max(_parse_kp(e) for e in events))
     except Exception as e:
         logger.warning(f"[Pipeline] Live Kp fetch failed: {e} — using quiet baseline (2.0)")
     return 2.0
 
 
-def run_debris_pipeline(app):
-    with app.app_context():
-        state = app.config["APP_STATE"]
-        logger.info("[Pipeline] Starting debris data refresh...")
+def _emit_debris_updated(app, stage: str, state: dict):
+    """Tell connected dashboards to re-fetch debris. Without this the frontend
+    only re-fetched every 10 minutes, so it kept showing the startup mock
+    objects long after the real data was ready."""
+    try:
+        app.extensions["socketio"].emit("debris_updated", {
+            "stage":      stage,                       # "heuristic" | "final"
+            "count":      len(state.get("debris_objects", [])),
+            "risk_score": state.get("current_risk_score", 0),
+            "is_mock":    bool(state.get("debris_is_mock")),
+        })
+    except Exception as e:
+        logger.debug(f"[Pipeline] debris_updated emit failed: {e}")
+
+
+def _publish_debris(app, state: dict, debris: list, stage: str):
+    """Atomically swap in a new debris list, update the aggregate score and
+    notify clients."""
+    scores = sorted((float(o.get("risk_score") or 0) for o in debris), reverse=True)
+    if scores:
+        top10 = scores[:max(1, len(scores) // 10)]
+        state["current_risk_score"] = round(sum(top10) / len(top10), 1)
+    state["debris_is_mock"] = bool(debris) and all(o.get("_is_mock") for o in debris)
+    state["debris_stage"] = stage
+    state["debris_objects"] = debris          # single assignment: readers never see a half-built list
+    _emit_debris_updated(app, stage, state)
+
+
+# ── Unusable element sets ─────────────────────────────────────────────────────
+# The live catalogue is the highest-BSTAR debris, which is dominated by objects in
+# their last days on orbit. Some of those have an apoapsis below 100 km (already
+# re-entered — the dashboard showed a "SL-8 DEB" at 89 km at #2 in the threat feed)
+# or an element set weeks old. SGP4 returns errors/garbage for them, they score
+# "high risk" purely because they are low and draggy, and they were being picked
+# FIRST by the conjunction screener (it screens the top 800 by risk) — so the
+# screened set was mostly objects that cannot produce a real encounter.
+MIN_VALID_APOAPSIS_KM = 160.0     # below this an object re-enters within hours
+MAX_ELEMENT_AGE_DAYS  = 30        # older TLEs are off by hundreds of km
+
+
+def _parse_epoch(s):
+    try:
+        s = str(s).strip().replace(" ", "T")
+        if "." in s:
+            head, frac = s.split(".", 1)
+            s = head + "." + frac[:6]
+        t = datetime.fromisoformat(s)
+        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    except Exception:
+        return None
+
+
+def _drop_unusable(debris, now=None):
+    """Returns (kept, {"decayed": n, "re_entering": n, "stale_epoch": n}).
+    Fields that are missing or unparseable never cause a drop. If the filter
+    would remove EVERYTHING (e.g. an unexpected data format) the original list
+    is returned untouched, so a bad assumption can never blank the dashboard."""
+    now = now or datetime.now(timezone.utc)
+    counts = {"decayed": 0, "re_entering": 0, "stale_epoch": 0}
+    kept = []
+    for o in debris:
+        if o.get("DECAY_DATE"):
+            counts["decayed"] += 1
+            continue
         try:
-            from backend.services.spacetrack import get_debris_tle
-            if getattr(Config, "DATA_MODE", "REAL") == "MOCK":
-                debris = _generate_mock_debris(5000)
-            else:
-                debris = get_debris_tle(limit=5000)
-                if not debris:
-                    logger.warning("[Pipeline] No TLE data — using mock debris")
+            apo = float(o.get("APOAPSIS"))
+        except (TypeError, ValueError):
+            apo = None
+        if apo is not None and 0 < apo < MIN_VALID_APOAPSIS_KM:
+            counts["re_entering"] += 1
+            continue
+        ep = _parse_epoch(o.get("EPOCH")) if o.get("EPOCH") else None
+        if ep is not None and (now - ep).total_seconds() > MAX_ELEMENT_AGE_DAYS * 86400:
+            counts["stale_epoch"] += 1
+            continue
+        kept.append(o)
+    if not kept and debris:
+        logger.warning("[Pipeline] Unusable-object filter would remove every object — ignoring it")
+        return debris, {k: 0 for k in counts}
+    return kept, counts
+
+
+_PIPELINE_LOCK = threading.Lock()
+
+
+def run_debris_pipeline(app) -> bool:
+    """
+    Fetch -> publish -> refine. Returns True on success, False on failure
+    (the caller retries).
+
+      Stage 1  fetch TLEs, propagate positions, heuristic-score, PUBLISH.
+               Real debris is on screen within seconds of the data arriving.
+      Stage 2  GNN scoring (needs NOAA Kp + the graph build), PUBLISH again.
+               If the GNN is disabled or fails, stage-1 scores simply stay.
+    """
+    if not _PIPELINE_LOCK.acquire(blocking=False):
+        logger.info("[Pipeline] Already running — skipping duplicate trigger")
+        return True
+    try:
+        with app.app_context():
+            state = app.config["APP_STATE"]
+            logger.info("[Pipeline] Starting debris data refresh...")
+            t0 = time.time()
+            try:
+                from backend.services.spacetrack import get_debris_tle, last_debris_source
+                real_mode = getattr(Config, "DATA_MODE", "REAL") != "MOCK"
+                state["debris_data_stale"] = False
+
+                if not real_mode:
                     debris = _generate_mock_debris(5000)
                 else:
-                    if len(debris) < 5000:
-                        debris.extend(_generate_mock_debris(5000 - len(debris)))
+                    raw = get_debris_tle(limit=5000)      # disk cache / stale fallback inside; raises if nothing
+                    if not raw:
+                        raise RuntimeError("Space-Track returned no TLE records")
+                    # True when Space-Track was unreachable and an OLD disk copy was
+                    # used. The loop below then retries in minutes, not 6 hours.
+                    state["debris_data_stale"] = (last_debris_source(5000) == "disk-stale")
+                    # Copy: the fetch layer caches these dicts, and the pipeline
+                    # adds keys to them. Never pad with mock objects — fabricated
+                    # objects must not be mixed into a real catalogue.
+                    debris = [dict(o) for o in raw]
+                    debris, dropped = _drop_unusable(debris)
+                    if any(dropped.values()):
+                        logger.info(
+                            f"[Pipeline] Excluded {sum(dropped.values())} unusable objects of {len(raw)}: "
+                            f"{dropped['re_entering']} re-entering (apoapsis < {MIN_VALID_APOAPSIS_KM:.0f} km), "
+                            f"{dropped['decayed']} decayed, {dropped['stale_epoch']} with elements older than "
+                            f"{MAX_ELEMENT_AGE_DAYS} days"
+                        )
 
-            # Real NOAA Kp — same source the dashboard's solar panel reads,
-            # so the GNN's risk scoring and the on-screen storm status can
-            # never silently disagree with each other.
-            kp = _get_live_kp()
-            logger.info(f"[Pipeline] Using live NOAA Kp={kp:.2f} for GNN scoring")
+                if real_mode:
+                    from backend.data.pipeline import tle_to_position
+                    now = datetime.now(timezone.utc)
+                    for k, obj in enumerate(debris):
+                        if k % 250 == 0:
+                            time.sleep(0)   # app.py runs under eventlet: yield so the web server isn't starved
+                        t1, t2 = obj.get("TLE_LINE1"), obj.get("TLE_LINE2")
+                        if t1 and t2:
+                            pos = tle_to_position(t1, t2, now)
+                            if pos:
+                                obj["lat"]    = pos["lat"]
+                                obj["lon"]    = pos["lon"]
+                                obj["alt_km"] = pos["alt_km"]
 
-            if getattr(Config, "DATA_MODE", "REAL") == "REAL":
-                from backend.data.pipeline import tle_to_position
-                for obj in debris:
-                    t1, t2 = obj.get("TLE_LINE1"), obj.get("TLE_LINE2")
-                    if t1 and t2:
-                        pos = tle_to_position(t1, t2)
-                        if pos:
-                            obj["lat"]    = pos["lat"]
-                            obj["lon"]    = pos["lon"]
-                            obj["alt_km"] = pos["alt_km"]
-
-            gnn_model = state.get("gnn_model")
-            if gnn_model:
-                from backend.gnn.model import predict_risk
-
-                # Split by apoapsis — only genuinely LEO-range objects go
-                # through the GNN; high-apogee objects get the heuristic.
-                gnn_eligible = [o for o in debris if _get_apoapsis(o) <= GNN_MAX_APOAPSIS_KM]
-                gnn_excluded = [o for o in debris if _get_apoapsis(o) > GNN_MAX_APOAPSIS_KM]
-
-                if gnn_eligible:
-                    gnn_eligible = predict_risk(gnn_model, gnn_eligible, kp_index=kp)
-                    for o in gnn_eligible:
-                        o["_scoring_method"] = "gnn"
-                if gnn_excluded:
-                    gnn_excluded = _score_debris(gnn_excluded)
-                    for o in gnn_excluded:
-                        o["_scoring_method"] = "heuristic_high_apogee"
-
-                debris = gnn_eligible + gnn_excluded
-                logger.info(
-                    f"[Pipeline] GNN scored {len(gnn_eligible)} objects (apoapsis <= {GNN_MAX_APOAPSIS_KM:.0f}km), "
-                    f"heuristic-scored {len(gnn_excluded)} high-apogee objects (> {GNN_MAX_APOAPSIS_KM:.0f}km)"
-                )
-            else:
+                # ── Stage 1: heuristic scores, publish immediately ──────────
                 debris = _score_debris(debris)
+                for o in debris:
+                    o["_scoring_method"] = "heuristic"
+                _publish_debris(app, state, debris, "heuristic")
+                logger.info(f"[Pipeline] Published {len(debris)} objects (heuristic scores) "
+                            f"in {time.time() - t0:.1f}s")
 
-            state["debris_objects"] = debris
-            state["last_tle_fetch"] = time.time()
+                # ── Stage 2: GNN refinement ─────────────────────────────────
+                gnn_model = state.get("gnn_model")
+                if gnn_model:
+                    try:
+                        from backend.gnn.model import predict_risk
+                        kp = _get_live_kp()
+                        logger.info(f"[Pipeline] Using live NOAA Kp={kp:.2f} for GNN scoring")
 
-            # Compute the aggregate score FIRST, before anything downstream
-            # reads it. Previously the Mongo snapshot below was stored
-            # using the OLD state["current_risk_score"] (from the
-            # *previous* pipeline run, 6h stale) because it read that key
-            # before this run's score had been computed — and on the very
-            # first pipeline run after a fresh deploy, the key doesn't
-            # exist yet at all, which raised KeyError and got swallowed by
-            # the outer `except Exception` as a silent "[Pipeline] Error"
-            # with no debris ever getting scored that run.
-            scores = sorted([o.get("risk_score", 0) for o in debris], reverse=True)
-            top10  = scores[:max(1, len(scores) // 10)]
-            state["current_risk_score"] = round(sum(top10) / len(top10), 1)
+                        # Only genuinely LEO-range objects go through the GNN;
+                        # high-apogee objects keep the heuristic score.
+                        eligible = [o for o in debris if _get_apoapsis(o) <= GNN_MAX_APOAPSIS_KM]
+                        excluded = [o for o in debris if _get_apoapsis(o) > GNN_MAX_APOAPSIS_KM]
+                        if eligible:
+                            eligible = _run_blocking(predict_risk, gnn_model, eligible, kp_index=kp)
+                            for o in eligible:
+                                o["_scoring_method"] = "gnn"
+                        for o in excluded:
+                            o["_scoring_method"] = "heuristic_high_apogee"
+                        debris = eligible + excluded
+                        _publish_debris(app, state, debris, "final")
+                        logger.info(
+                            f"[Pipeline] GNN scored {len(eligible)} objects (apoapsis <= "
+                            f"{GNN_MAX_APOAPSIS_KM:.0f}km), heuristic-scored {len(excluded)} "
+                            f"high-apogee objects"
+                        )
+                    except Exception as e:
+                        logger.error(f"[Pipeline] GNN scoring failed — keeping heuristic scores: {e}",
+                                     exc_info=True)
+                else:
+                    logger.info("[Pipeline] GNN not loaded — objects are heuristic-scored")
 
-            # Record this REAL, freshly-computed score into the rolling
-            # history buffer that powers the Solar Correlation panel's red
-            # risk line (see backend/services/risk_history.py). This is
-            # the authoritative sample point — one real point per pipeline
-            # run (~6h cadence, or on-demand if triggered manually), as
-            # opposed to the /api/solar/* routes' fallback sampling which
-            # just repeats whatever this value currently is between runs.
-            risk_history.record_risk_score(state["current_risk_score"])
+                debris = state["debris_objects"]
+                state["last_tle_fetch"] = time.time()
+                score_now = state.get("current_risk_score", 0.0)
+                risk_history.record_risk_score(score_now)
+                mongo = state.get("mongo_store")
+                if mongo and mongo.connected:
+                    mongo.store_debris_snapshot(debris, score_now)
 
-            mongo = state.get("mongo_store")
-            if mongo and mongo.connected:
-                mongo.store_debris_snapshot(debris, state["current_risk_score"])
+                top = max((float(o.get("risk_score") or 0) for o in debris), default=0.0)
+                logger.info(f"[Pipeline] Done. {len(debris)} objects in {time.time() - t0:.1f}s. Top: {top:.1f}")
+                return True
 
-            logger.info(f"[Pipeline] Done. {len(debris)} objects. Top: {scores[0]:.1f}")
-        except Exception as e:
-            logger.error(f"[Pipeline] Error: {e}", exc_info=True)
+            except Exception as e:
+                logger.error(f"[Pipeline] Error: {e}", exc_info=True)
+                # Nothing real to show (first run, no disk cache, Space-Track down):
+                # show clearly-flagged demo objects rather than an empty globe.
+                if not state.get("debris_objects"):
+                    demo = _score_debris(_generate_mock_debris(500))
+                    _publish_debris(app, state, demo, "demo")
+                    logger.warning("[Pipeline] Showing 500 DEMO objects until real data is available")
+                return False
+    finally:
+        _PIPELINE_LOCK.release()
 
 
-def run_conjunction_screener(app):
+def run_conjunction_screener(app) -> bool:
     """
     Runs both D×ISS and D×D conjunction screening.
     Combines all results, emits WebSocket alerts for RED/AMBER events.
+    Returns True if the run completed with both screeners, False if it failed or
+    had to skip D×ISS (the caller then retries sooner than the usual 30 min).
     """
+    complete = True
     with app.app_context():
         state = app.config["APP_STATE"]
         logger.info("[Conjunction] Starting screening run (D×ISS + D×D)...")
+        # Lets the UI tell "still screening" from "screened, nothing found" —
+        # both used to look like "CONJUNCTIONS · 0".
+        state["conjunction_screening"] = True
 
         try:
             from backend.data.conjunction_screener import (
@@ -176,26 +307,38 @@ def run_conjunction_screener(app):
                 conjunctions = generate_mock_conjunctions(n=8)
                 logger.info(f"[Conjunction] Mock mode — {len(conjunctions)} mock events")
             else:
-                from backend.services.spacetrack import get_iss_tle
+                # Previously `iss_tle = get_iss_tle()` raised when Space-Track was
+                # unreachable, which aborted the WHOLE run: no D×D either, and
+                # state["conjunctions"] stayed empty for the next 30 minutes
+                # ("CONJUNCTIONS · 0"). The ISS TLE is only needed for D×ISS.
+                iss_tle = _cached_iss_tle()
+                if iss_tle:
+                    dxiss_events = _run_blocking(
+                        screen_conjunctions,
+                        debris_objects=debris,
+                        iss_tle=iss_tle,
+                        window_hours=72,
+                        sample_interval_s=60,
+                        miss_threshold_km=25.0,
+                        max_objects=300,
+                    )
+                else:
+                    dxiss_events = []
+                    complete = False
+                    logger.warning("[Conjunction] No ISS TLE (Space-Track unreachable, nothing cached) — "
+                                   "skipping D×ISS this run; D×D screening continues")
 
-                iss_tle = get_iss_tle()
-
-                # Run both screeners
-                dxiss_events = screen_conjunctions(
+                dxd_events = _run_blocking(
+                    screen_debris_conjunctions,
                     debris_objects=debris,
-                    iss_tle=iss_tle,
                     window_hours=72,
                     sample_interval_s=60,
+                    # 25 km / 800 objects: the measured miss-distance error vs
+                    # Space-Track is ~18 km (median), so a 10 km cut-off dropped
+                    # real events. Alert tiers (RED < 2 km, AMBER < 5 km) are
+                    # unchanged, so only the timeline gains the wider YELLOW band.
                     miss_threshold_km=25.0,
-                    max_objects=300,
-                )
-
-                dxd_events = screen_debris_conjunctions(
-                    debris_objects=debris,
-                    window_hours=72,
-                    sample_interval_s=60,
-                    miss_threshold_km=10.0,
-                    max_objects=200,
+                    max_objects=800,
                 )
 
                 # Combine and sort by miss distance
@@ -212,9 +355,20 @@ def run_conjunction_screener(app):
             state["conjunctions"]              = conjunctions
             publish_buzzer_state(state["conjunctions"])
             state["last_conjunction_screen"]   = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            try:
+                app.extensions["socketio"].emit("conjunctions_updated", {
+                    "count": sum(1 for c in conjunctions if not c.get("_is_mock")),
+                    "last_screened": state["last_conjunction_screen"],
+                })
+            except Exception as e:
+                logger.debug(f"[Conjunction] conjunctions_updated emit failed: {e}")
 
             # Emit WebSocket alerts for RED and AMBER events
-            from backend.app import socketio
+            # Use the socketio instance attached to THIS app. Importing
+            # backend.app here re-executes it as a second module when it was
+            # launched as __main__, creating a second SocketIO with no
+            # connected clients, so alerts were emitted into the void.
+            socketio = app.extensions["socketio"]
             critical = [c for c in conjunctions if c.get("alert") in ("RED", "AMBER")
                         and not c.get("_is_mock")]
             if critical:
@@ -234,6 +388,26 @@ def run_conjunction_screener(app):
 
         except Exception as e:
             logger.error(f"[Conjunction] Screener error: {e}", exc_info=True)
+            complete = False
+        finally:
+            state["conjunction_screening"] = False
+    return complete
+
+
+_iss_tle_cache = {"t": 0.0, "v": None}
+
+
+def _cached_iss_tle(ttl_s: int = 1800):
+    """ISS TLE changes slowly; don't hit Space-Track every minute."""
+    now = time.time()
+    if _iss_tle_cache["v"] is None or now - _iss_tle_cache["t"] > ttl_s:
+        try:
+            from backend.services.spacetrack import get_iss_tle
+            _iss_tle_cache["v"] = get_iss_tle()
+            _iss_tle_cache["t"] = now
+        except Exception as e:
+            logger.warning(f"[ISS Updater] ISS TLE fetch failed: {e}")
+    return _iss_tle_cache["v"]
 
 
 def run_iss_updater(app):
@@ -266,27 +440,40 @@ def run_iss_updater(app):
                     mongo.store_iss_position(iss_pos)
 
                 debris = state.get("debris_objects", [])
-                if iss_pos and debris:
-                    iss_lat = math.radians(iss_pos.get("lat", 0) or 0)
-                    iss_lon = math.radians(iss_pos.get("lon", 0) or 0)
-                    iss_alt = (iss_pos.get("alt_km", 408) or 408) + 6371.0
-                    iss_eci = {
-                        "x_km": iss_alt * math.cos(iss_lat) * math.cos(iss_lon),
-                        "y_km": iss_alt * math.cos(iss_lat) * math.sin(iss_lon),
-                        "z_km": iss_alt * math.sin(iss_lat),
-                    }
+                iss_tle = _cached_iss_tle()
+                # ONE timestamp for the ISS and every debris object. Propagating
+                # each at its own datetime.now() spread the positions over the
+                # ~0.3 s the loop takes — at ~7.7 km/s that is a ~2-3 km error,
+                # comparable to the 5/10 km alert thresholds.
+                now = datetime.now(timezone.utc)
+                iss_eci = None
+                if iss_tle:
+                    p = tle_to_position(iss_tle.get("TLE_LINE1", ""), iss_tle.get("TLE_LINE2", ""), now)
+                    if p:
+                        # SAME frame (SGP4 TEME) as the debris positions below.
+                        iss_eci = {"x_km": p["x_km"], "y_km": p["y_km"], "z_km": p["z_km"]}
+                # Needs only the ISS TLE and the debris — NOT the N2YO position,
+                # so a missing/invalid N2YO key no longer disables proximity.
+                if debris and iss_eci:
                     propagated = []
-                    for obj in debris[:200]:
+                    # Every real object, not just the first 1000 (which, in
+                    # BSTAR order, mostly can't be anywhere near the ISS).
+                    for k, obj in enumerate(debris):
+                        if k % 250 == 0:
+                            time.sleep(0)   # yield to the eventlet hub
                         t1, t2 = obj.get("TLE_LINE1"), obj.get("TLE_LINE2")
-                        if t1 and t2:
-                            pos = tle_to_position(t1, t2)
-                            if pos:
-                                propagated.append({
-                                    "norad_id": obj.get("NORAD_CAT_ID"),
-                                    "name":     obj.get("OBJECT_NAME", "Unknown"),
-                                    "position": pos,
-                                })
+                        if not (t1 and t2) or obj.get("_is_mock"):
+                            continue
+                        pos = tle_to_position(t1, t2, now)
+                        if pos:
+                            propagated.append({
+                                "norad_id": obj.get("NORAD_CAT_ID"),
+                                "name":     obj.get("OBJECT_NAME", "Unknown"),
+                                "position": pos,
+                            })
                     proximity = compute_iss_proximity(iss_eci, propagated)
+                    proximity["checked"] = len(propagated)
+                    proximity["as_of"] = now.isoformat()
                     state["iss_proximity"] = proximity
         except Exception as e:
             logger.error(f"[ISS Updater] Error: {e}")
@@ -296,25 +483,62 @@ def run_iss_updater(app):
 def start_background_tasks(app):
     logger.info("[Tasks] Starting background tasks...")
 
-    t1 = threading.Thread(target=run_debris_pipeline, args=(app,), daemon=True)
-    t1.start()
+    def debris_loop():
+        # One worker: run now, refresh every 6 h, and on FAILURE retry with
+        # backoff (1, 2, 4, 8, 15 min). Previously a single failed Space-Track
+        # call left the startup mock data on screen for the full 6 hours.
+        failures = 0
+        while True:
+            ok = run_debris_pipeline(app)
+            stale = ok and bool(app.config["APP_STATE"].get("debris_data_stale"))
+            if ok and not stale:
+                failures = 0
+                time.sleep(6 * 3600)
+            else:
+                failures += 1
+                wait = min(60 * 2 ** (failures - 1), 900)
+                why = "Space-Track unreachable — showing STALE cached data" if stale else "failed"
+                logger.warning(f"[Pipeline] {why} (attempt {failures}) — retrying in {wait // 60} min")
+                time.sleep(wait)
+
+    threading.Thread(target=debris_loop, daemon=True).start()
+
+    def noaa_warmup():
+        # Prefetch NOAA data now, in the background, so the Solar Weather and
+        # Correlation panels have it when the page loads instead of waiting on
+        # a cold network fetch (which, on a slow DNS, took 15-30 s).
+        try:
+            from backend.services.noaa_swpc import warm_cache
+            warm_cache()
+            logger.info("[Tasks] NOAA cache warmed")
+        except Exception as e:
+            logger.warning(f"[Tasks] NOAA warm-up failed: {e}")
+
+    threading.Thread(target=noaa_warmup, daemon=True).start()
 
     t2 = threading.Thread(target=run_iss_updater, args=(app,), daemon=True)
     t2.start()
 
-    def periodic_debris():
-        while True:
-            time.sleep(6 * 3600)
-            run_debris_pipeline(app)
-
-    threading.Thread(target=periodic_debris, daemon=True).start()
-
     def conjunction_loop():
-        time.sleep(30)             # wait for TLE data to load first
-        run_conjunction_screener(app)
+        # Wait until the first debris pipeline run has actually finished
+        # (a fixed 30 s sleep raced it and produced mock-only first results).
+        state = app.config["APP_STATE"]
+        waited = 0
+        while not state.get("last_tle_fetch") and waited < 600:
+            time.sleep(5)
+            waited += 5
+        ok = run_conjunction_screener(app)
+        quick = 0
         while True:
-            time.sleep(30 * 60)   # re-screen every 30 minutes
-            run_conjunction_screener(app)
+            if ok:
+                quick = 0
+                time.sleep(30 * 60)               # re-screen every 30 minutes
+            else:
+                quick += 1
+                wait = min(5 * 60 * 2 ** (quick - 1), 30 * 60)   # 5, 10, 20, 30 min
+                logger.warning(f"[Conjunction] Incomplete run — retrying in {wait // 60} min")
+                time.sleep(wait)
+            ok = run_conjunction_screener(app)
 
     threading.Thread(target=conjunction_loop, daemon=True).start()
 
@@ -322,7 +546,20 @@ def start_background_tasks(app):
 
 
 def _score_debris(debris):
-    import random
+    """
+    PLACEHOLDER heuristic (used until a GNN checkpoint is loaded, and for
+    high-apogee objects). It is a drag/low-altitude/eccentricity proxy, NOT a
+    collision probability, and should be described that way.
+
+    Two changes from the original:
+      - The BSTAR term used to be min(bstar*80000, 35), which saturates at
+        BSTAR 4.4e-4. The live catalogue is the 5,000 HIGHEST-BSTAR objects, so
+        most sat at the cap and the score stopped discriminating (half the catalogue
+        landed in HIGH). It is now log-scaled over 1e-4..3e-2.
+      - The up-to-10-point pseudo-random "jitter" (seeded from the NORAD id) is
+        gone: a risk score must not contain invented noise.
+    """
+    import math
     for obj in debris:
         if "risk_score" in obj and obj["risk_score"] is not None:
             continue
@@ -331,15 +568,15 @@ def _score_debris(debris):
             bstar = abs(float(obj.get("BSTAR", 0) or 0))
             ecc   = float(obj.get("ECCENTRICITY", 0) or 0)
             alt_score   = max(0, (900 - alt) / 900) * 35
-            bstar_score = min(bstar * 80000, 35)
+            if bstar > 0:
+                frac = (math.log10(bstar) + 4.0) / 2.5          # 1e-4 -> 0, 3e-2 -> ~1
+                bstar_score = max(0.0, min(frac, 1.0)) * 35
+            else:
+                bstar_score = 0.0
             ecc_score   = min(ecc * 200, 20)
-            seed_val    = obj.get("NORAD_CAT_ID", 0) or 0
-            random.seed(int(seed_val) * 123)
-            jitter = random.uniform(0, 10)
-            random.seed()
-            score = min(round(alt_score + bstar_score + ecc_score + jitter, 1), 100)
+            score = min(round(alt_score + bstar_score + ecc_score, 1), 100)
         except (ValueError, TypeError):
-            score = round(random.uniform(5, 40), 1)
+            score = 10.0
         obj["risk_score"] = score
         obj["risk_level"] = (
             "CRITICAL" if score >= 80 else
