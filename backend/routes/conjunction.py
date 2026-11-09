@@ -2,9 +2,10 @@
 Conjunction routes — upcoming close approach predictions.
 Covers both Debris×ISS and Debris×Debris events.
 """
-from flask import Blueprint, jsonify, request, current_app
-from datetime import datetime, timezone
 import logging
+from datetime import UTC, datetime
+
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger(__name__)
 conjunction_bp = Blueprint("conjunction", __name__, url_prefix="/api/conjunction")
@@ -15,13 +16,13 @@ def _live_events(conjunctions):
     drop events whose TCA has already passed. tca_hours is frozen at
     screening time, so without this the UI shows stale countdowns and keeps
     expired events until the next 30-minute screening run."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     out = []
     for c in conjunctions:
         try:
             tca = datetime.fromisoformat(c["tca"])
             if tca.tzinfo is None:
-                tca = tca.replace(tzinfo=timezone.utc)
+                tca = tca.replace(tzinfo=UTC)
             hrs = (tca - now).total_seconds() / 3600
         except (KeyError, ValueError, TypeError):
             out.append(c)
@@ -134,6 +135,7 @@ def conjunction_stats():
 def refresh_conjunctions():
     """POST /api/conjunction/refresh — trigger a fresh screening run."""
     import threading
+
     from backend.tasks import run_conjunction_screener
     app = current_app._get_current_object()
     threading.Thread(target=run_conjunction_screener, args=(app,), daemon=True).start()

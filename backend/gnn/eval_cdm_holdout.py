@@ -31,12 +31,12 @@ Why this exists:
 Run: python -m backend.gnn.eval_cdm_holdout [--folds 5] [--epochs 200] [--ablation]
 (copy into backend/gnn/ next to train.py)
 """
-import os
-import sys
-import json
-import random
 import argparse
+import json
 import logging
+import os
+import random
+import sys
 
 import torch
 
@@ -44,10 +44,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from backend.gnn.model import DebrisGNN, build_graph_from_tle_data
 from backend.gnn.train import (
-    build_labels_from_cdm, _weighted_bce, _will_cross_dense_band,
-    DENSE_BANDS, LR, DEVICE,
+    DENSE_BANDS,
+    DEVICE,
+    LR,
+    _weighted_bce,
+    _will_cross_dense_band,
+    build_labels_from_cdm,
 )
-from backend.services.spacetrack import get_debris_tle_sample_with_cdm_positives, get_cdm
+from backend.services.spacetrack import (
+    get_cdm,
+    get_debris_tle_sample_with_cdm_positives,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

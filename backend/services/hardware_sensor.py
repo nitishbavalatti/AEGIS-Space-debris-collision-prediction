@@ -32,9 +32,10 @@ import os
 import re
 import threading
 import time
+from datetime import UTC, datetime, timedelta
+
 import numpy as np
 import requests
-from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,6 @@ class HardwareSensor:
             from rtlsdr import RtlSdr
             logger.info("[HW Sensor] Scanning for RTL-SDR devices...")
 
-            num_devices = RtlSdr.get_num_gain_values(0) if hasattr(RtlSdr, 'get_num_gain_values') else None
             self.sdr = RtlSdr()
             self.sdr.sample_rate = 2.4e6
             self.sdr.center_freq = 137.5e6  # NOAA band
@@ -207,7 +207,7 @@ class HardwareSensor:
 
         # Build merged reading in same schema as MockSensor
         merged = {
-            "timestamp": esp32_data.get("timestamp", datetime.now(timezone.utc).isoformat()),
+            "timestamp": esp32_data.get("timestamp", datetime.now(UTC).isoformat()),
             "tick": esp32_data.get("tick", 0),
             "source": "esp32",  # Real hardware
             "mag": esp32_data.get("mag", {}),
@@ -390,7 +390,7 @@ class HardwareSensor:
         every 60s costs nothing extra.
         """
         try:
-            from backend.services.noaa_swpc import get_kp_history, _kp_to_level
+            from backend.services.noaa_swpc import _kp_to_level, get_kp_history
 
             events, ok = get_kp_history(days_back=1)
             if not ok or not events:
@@ -420,7 +420,7 @@ class HardwareSensor:
         a stale '0' point and the first live reading, the same problem
         MockSensor avoids by pre-seeding history on start().
         """
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         backfilled = []
         for i in range(count, 0, -1):
             ts = now - timedelta(seconds=i * interval_s)
@@ -470,7 +470,7 @@ class HardwareSensor:
                         self._mag_backfilled = True
 
                     reading = {
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "timestamp": datetime.now(UTC).isoformat(),
                         "tick": int(time.time()),
                         "source": f"usgs_{USGS_OBSERVATORY}",  # ← flags this as fallback data
                         "mag": mag,
@@ -556,7 +556,7 @@ class HardwareSensor:
                         # frontend can't plot a fake zero point) and it is NOT added
                         # to self.history (so it never seeds the mag backfill).
                         self.emit({
-                            "timestamp": datetime.now(timezone.utc).isoformat(),
+                            "timestamp": datetime.now(UTC).isoformat(),
                             "tick": int(time.time()),
                             "source": "rtlsdr",
                             "rf": rf_data,

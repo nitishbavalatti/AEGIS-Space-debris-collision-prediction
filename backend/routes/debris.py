@@ -1,6 +1,7 @@
 """Debris routes — TLE data, risk scores, altitude heatmap."""
-from flask import Blueprint, jsonify, request, current_app
 import logging
+
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger(__name__)
 debris_bp = Blueprint("debris", __name__, url_prefix="/api/debris")

@@ -10,9 +10,9 @@ Tests cover:
   - API routes (with Flask test client)
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-import sys
 import os
-import math
+import sys
+
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
@@ -110,7 +110,10 @@ class TestGNNModel:
 
     def test_graph_builds_from_tle_data(self):
         try:
-            from backend.gnn.model import build_graph_from_tle_data, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import (
+                TORCH_GEOMETRIC_AVAILABLE,
+                build_graph_from_tle_data,
+            )
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
             graph = build_graph_from_tle_data(self.SAMPLE_DEBRIS, kp_index=2.0)
@@ -123,7 +126,10 @@ class TestGNNModel:
 
     def test_node_features_normalized(self):
         try:
-            from backend.gnn.model import build_graph_from_tle_data, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import (
+                TORCH_GEOMETRIC_AVAILABLE,
+                build_graph_from_tle_data,
+            )
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
             graph = build_graph_from_tle_data(self.SAMPLE_DEBRIS, kp_index=0.0)
@@ -135,7 +141,10 @@ class TestGNNModel:
 
     def test_kp_index_affects_features(self):
         try:
-            from backend.gnn.model import build_graph_from_tle_data, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import (
+                TORCH_GEOMETRIC_AVAILABLE,
+                build_graph_from_tle_data,
+            )
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
             g0 = build_graph_from_tle_data(self.SAMPLE_DEBRIS, kp_index=0.0)
@@ -147,7 +156,7 @@ class TestGNNModel:
 
     def test_load_model_without_checkpoint_returns_none(self):
         try:
-            from backend.gnn.model import load_model, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import TORCH_GEOMETRIC_AVAILABLE, load_model
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
             assert load_model(checkpoint_path=None) is None
@@ -165,7 +174,11 @@ class TestGNNModel:
 
     def test_predict_risk_returns_scores(self):
         try:
-            from backend.gnn.model import DebrisGNN, predict_risk, TORCH_GEOMETRIC_AVAILABLE
+            from backend.gnn.model import (
+                TORCH_GEOMETRIC_AVAILABLE,
+                DebrisGNN,
+                predict_risk,
+            )
             if not TORCH_GEOMETRIC_AVAILABLE:
                 pytest.skip("torch-geometric not installed")
             # load_model(None) intentionally returns None now (no silent
@@ -258,7 +271,7 @@ class TestDataPipeline:
         assert result["alert"] == "AMBER"
 
     def test_tle_to_position_requires_sgp4(self):
-        from backend.data.pipeline import tle_to_position, SGP4_AVAILABLE
+        from backend.data.pipeline import SGP4_AVAILABLE, tle_to_position
         if not SGP4_AVAILABLE:
             pytest.skip("sgp4 not installed")
         # ISS TLE (slightly outdated, but valid for testing)

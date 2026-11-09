@@ -26,12 +26,12 @@ FREQUENCIES MONITORED:
   due to increased ionospheric absorption/emission.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-import time
 import json
 import logging
-import threading
+import time
+from datetime import UTC, datetime
+
 import numpy as np
-from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -158,7 +158,7 @@ def run_rtlsdr_monitor():
             )
 
             payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "tick": int(tick),  # ← FIX: Ensure int type
                 "source": "rtlsdr",
                 "rf": {
@@ -227,7 +227,7 @@ def _run_rtlsdr_mock(client):
             )
 
             payload = {
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": datetime.now(UTC).isoformat(),
                 "tick": tick,
                 "source": "rtlsdr_mock",
                 "rf": {

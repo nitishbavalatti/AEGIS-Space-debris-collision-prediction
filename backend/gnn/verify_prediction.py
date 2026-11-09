@@ -20,11 +20,11 @@ Honest framing: for debris there is no ground-truth observation of the
 miss distance. The recomputed value is a BETTER ESTIMATE, not truth, and
 shows how much the prediction moved once fresher orbital data arrived.
 """
-import os
-import sys
 import json
 import logging
-from datetime import datetime, timezone
+import os
+import sys
+from datetime import UTC, datetime
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
@@ -38,7 +38,7 @@ ISS_ID = "25544"
 
 
 def _now():
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _key(id_a, id_b, tca_iso):
@@ -58,8 +58,8 @@ def _save(path, obj):
 def _find_cdm(id_a, id_b):
     """Space-Track's own latest CDM for this pair, or None."""
     try:
-        from backend.services.spacetrack import _client
         from backend.config import Config
+        from backend.services.spacetrack import _client
         _client._ensure_auth()
         best = None
         for s1, s2 in ((id_a, id_b), (id_b, id_a)):
@@ -123,8 +123,8 @@ def snapshot():
 
 
 def verify():
-    from backend.services.spacetrack import get_tle_by_norad_ids
     from backend.gnn.compare_to_spacetrack import _closest, _parse_tca
+    from backend.services.spacetrack import get_tle_by_norad_ids
 
     log = _load_log()
     if not log:

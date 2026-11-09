@@ -14,18 +14,23 @@ highest-scoring objects really come to something.
 Run (backend must be running):
   python -m backend.gnn.top_threat_approaches [N]
 """
+import logging
 import os
 import sys
 import time
-import logging
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timedelta
 
 import numpy as np
 import requests
 from sgp4.api import Satrec, jday
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
-from backend.data.conjunction_screener import _propagate_all, _alt_range_km, _refine, _risk_rank
+from backend.data.conjunction_screener import (
+    _alt_range_km,
+    _propagate_all,
+    _refine,
+    _risk_rank,
+)
 
 logging.basicConfig(level=logging.WARNING)
 API = os.getenv("AEGIS_API", "http://localhost:5000/api")
@@ -55,7 +60,7 @@ def nearest_approaches(objects, top_n=15, window_hours=72, step_s=60, chunk=500,
         return []
     top_n = min(top_n, n)
 
-    now = start_time or datetime.now(timezone.utc)
+    now = start_time or datetime.now(UTC)
     n_t = int((window_hours * 3600) // step_s)
     jd0, fr0 = jday(now.year, now.month, now.day, now.hour, now.minute,
                     now.second + now.microsecond / 1e6)

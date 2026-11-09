@@ -11,10 +11,9 @@ A single D×D collision at 800km creates thousands of new fragments
 that threaten everything else in that shell.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-import math
 import logging
-from datetime import datetime, timezone, timedelta
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import math
+from datetime import UTC, datetime, timedelta
 
 
 def _real_futures():
@@ -45,7 +44,7 @@ except ImportError:           # falls back to the slower per-pair python loop
     NUMPY_OK = False
 
 try:
-    from sgp4.api import SatrecArray     # missing in older sgp4 releases
+    from sgp4.api import SatrecArray  # missing in older sgp4 releases
 except ImportError:
     SatrecArray = None
 
@@ -230,7 +229,7 @@ def screen_conjunctions(debris_objects, iss_tle,
     if not SGP4_AVAILABLE or not iss_tle or not iss_tle.get("TLE_LINE1"):
         return []
 
-    now    = datetime.now(timezone.utc)
+    now    = datetime.now(UTC)
     times  = [now + timedelta(seconds=i * sample_interval_s)
               for i in range((window_hours * 3600) // sample_interval_s)]
     iss_pos = _propagate_object_bulk(iss_tle["TLE_LINE1"], iss_tle["TLE_LINE2"], times)
@@ -311,7 +310,7 @@ def _screen_debris_conjunctions_legacy(debris_objects,
     if len(candidates) < 2:
         return []
 
-    now   = datetime.now(timezone.utc)
+    now   = datetime.now(UTC)
     times = [now + timedelta(seconds=i * sample_interval_s)
              for i in range((window_hours * 3600) // sample_interval_s)]
 
@@ -466,7 +465,7 @@ def screen_debris_conjunctions(debris_objects,
         return []
     logger.info("[Conjunction] D×D mode: all-pairs (vectorised, no inclination filter)")
 
-    now = start_time or datetime.now(timezone.utc)
+    now = start_time or datetime.now(UTC)
     n_t = int((window_hours * 3600) // sample_interval_s)
     jd0, fr0 = jday(now.year, now.month, now.day, now.hour, now.minute,
                     now.second + now.microsecond / 1e6)
@@ -553,7 +552,7 @@ def screen_debris_conjunctions(debris_objects,
                     closest = best
                 for i, j, (min_d, tca, rv_) in found:
                     events.append(_dxd_event(objs[i], objs[j], min_d, tca, rv_, now))
-            except Exception as e:
+            except Exception:
                 # Was logger.debug: if every worker failed the run silently reported
                 # "0 events" and nothing in the log said why.
                 errors += 1
@@ -591,7 +590,7 @@ def generate_mock_conjunctions(n=8):
         ("43641", "BREEZE-M DEB",     22.4, 1.5, "CIS", "2018", "290", "48.9"),
         ("31595", "H-2A R/B DEB",    17.8, 2.2, "JPN", "2007", "602", "98.1"),
     ]
-    now    = datetime.now(timezone.utc)
+    now    = datetime.now(UTC)
     events = []
     for norad, name, miss, rv, country, launch, apo, incl in MOCK[:n]:
         hours = random.uniform(1, 70)

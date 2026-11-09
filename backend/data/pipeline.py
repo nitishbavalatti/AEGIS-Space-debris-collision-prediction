@@ -3,9 +3,9 @@ AEGIS Data Pipeline
 Handles TLE → orbital position propagation using SGP4,
 altitude binning for the heatmap, and ISS proximity calculation.
 """
-import math
 import logging
-from datetime import datetime, timezone, timedelta
+import math
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +26,7 @@ def tle_to_position(tle_line1: str, tle_line2: str, dt: datetime = None) -> dict
         return None
 
     if dt is None:
-        dt = datetime.now(timezone.utc)
+        dt = datetime.now(UTC)
 
     try:
         satellite = Satrec.twoline2rv(tle_line1, tle_line2)

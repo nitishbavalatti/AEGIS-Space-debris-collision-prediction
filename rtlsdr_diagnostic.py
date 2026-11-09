@@ -4,8 +4,8 @@ RTL-SDR Diagnostic Tool
 Checks if your RTL-SDR device is properly connected and recognized.
 """
 
-import sys
 import logging
+import sys
 
 logging.basicConfig(level=logging.INFO, format='%(message)s')
 logger = logging.getLogger(__name__)
@@ -33,14 +33,14 @@ def check_rtlsdr():
         # Try to enumerate devices using rtlsdr
         try:
             sdr = RtlSdr()
-            print(f"    ✅ RTL-SDR device found and accessible!")
-            print(f"    → Device index: 0")
+            print("    ✅ RTL-SDR device found and accessible!")
+            print("    → Device index: 0")
             
             # Try to read sample count
             try:
                 gain_values = sdr.get_gains()
                 print(f"    → Available gains: {gain_values}")
-            except:
+            except Exception:
                 pass
             
             sdr.close()

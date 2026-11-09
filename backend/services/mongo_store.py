@@ -42,13 +42,13 @@ that instead.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
 try:
-    from pymongo import MongoClient, ASCENDING
-    from pymongo.errors import ConnectionFailure, ConfigurationError
+    from pymongo import ASCENDING, MongoClient
+    from pymongo.errors import ConfigurationError
     MONGO_AVAILABLE = True
 except ImportError:
     MONGO_AVAILABLE = False
@@ -104,7 +104,7 @@ class MongoStore:
         self.db.iss_positions.create_index([("timestamp", ASCENDING)])
 
     def _write_ok(self):
-        self.last_write_ok_at = datetime.now(timezone.utc)
+        self.last_write_ok_at = datetime.now(UTC)
         self.last_error = None
 
     def _write_failed(self, context: str, e: Exception):
@@ -124,7 +124,7 @@ class MongoStore:
         if self.last_write_ok_at is None:
             # Nothing attempted yet — not necessarily broken.
             return True
-        age = datetime.now(timezone.utc) - self.last_write_ok_at
+        age = datetime.now(UTC) - self.last_write_ok_at
         return age < timedelta(minutes=max_staleness_minutes)
 
     # ------------------------------------------------------------------
@@ -140,7 +140,7 @@ class MongoStore:
         if not self.connected:
             return
         try:
-            doc = {**reading, "stored_at": datetime.now(timezone.utc)}
+            doc = {**reading, "stored_at": datetime.now(UTC)}
             self.db.sensor_readings.insert_one(doc)
             self._write_ok()
         except Exception as e:
@@ -151,7 +151,7 @@ class MongoStore:
         if not self.connected:
             return []
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
             cursor = self.db.sensor_readings.find(
                 {"timestamp": {"$gte": cutoff}}
             ).sort("timestamp", ASCENDING)
@@ -169,7 +169,7 @@ class MongoStore:
             return
         try:
             doc = {
-                "timestamp": datetime.now(timezone.utc),
+                "timestamp": datetime.now(UTC),
                 "debris_count": len(debris),
                 "mean_risk": risk_score,
                 "top_10": sorted(
@@ -208,7 +208,7 @@ class MongoStore:
         if not self.connected:
             return []
         try:
-            cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+            cutoff = datetime.now(UTC) - timedelta(hours=hours)
             cursor = self.db.debris_snapshots.find(
                 {"timestamp": {"$gte": cutoff}},
                 {"timestamp": 1, "mean_risk": 1, "_id": 0},
@@ -221,8 +221,8 @@ class MongoStore:
                 if ts is None or risk is None:
                     continue
                 if ts.tzinfo is None:
-                    ts = ts.replace(tzinfo=timezone.utc)
-                ts_str = ts.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S")
+                    ts = ts.replace(tzinfo=UTC)
+                ts_str = ts.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S")
                 try:
                     out.append((ts_str, float(risk)))
                 except (TypeError, ValueError):
@@ -240,7 +240,7 @@ class MongoStore:
         if not self.connected:
             return
         try:
-            doc = {**pos, "stored_at": datetime.now(timezone.utc)}
+            doc = {**pos, "stored_at": datetime.now(UTC)}
             self.db.iss_positions.insert_one(doc)
             self._write_ok()
         except Exception as e:

@@ -24,13 +24,14 @@ Why GNN over physics-only?
 """
 import math
 import time
+
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 try:
-    from torch_geometric.nn import GATConv, global_mean_pool
-    from torch_geometric.data import Data, Batch
+    from torch_geometric.data import Data
+    from torch_geometric.nn import GATConv
     TORCH_GEOMETRIC_AVAILABLE = True
 except ImportError:
     TORCH_GEOMETRIC_AVAILABLE = False
@@ -223,8 +224,9 @@ def build_graph_from_tle_data(debris_objects: list[dict], kp_index: float = 0.0)
     Converts a list of TLE/orbital records into a PyG Data object.
     Now includes 30-day projected altitude features (features 9, 10, 11).
     """
-    import numpy as np
     from datetime import datetime
+
+    import numpy as np
 
     if not TORCH_GEOMETRIC_AVAILABLE:
         return None

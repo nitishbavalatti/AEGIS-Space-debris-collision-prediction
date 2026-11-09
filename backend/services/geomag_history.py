@@ -32,8 +32,8 @@ NOAA outage: if a fetch fails or returns nothing, snapshot() still
 serves whatever was already locked in, instead of the chart blanking to
 "NOAA SWPC UNREACHABLE" over what might just be one bad poll.
 """
-from datetime import datetime, timezone
 import threading
+from datetime import UTC, datetime
 
 _LOCK = threading.Lock()
 _LOCKED: dict[str, dict] = {}  # time_tag -> {"bt_nT": float, "bz_nT": float | None}
@@ -45,7 +45,7 @@ def _parse_ts(ts: str):
     try:
         t = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         if t.tzinfo is None:
-            t = t.replace(tzinfo=timezone.utc)
+            t = t.replace(tzinfo=UTC)
         return t
     except Exception:
         return None
@@ -70,7 +70,7 @@ def ingest(rows: list[dict]) -> None:
             _LOCKED[ts] = {"bt_nT": row.get("bt_nT"), "bz_nT": row.get("bz_nT")}
 
         if len(_LOCKED) > _TRIM_CHECK_THRESHOLD:
-            cutoff = datetime.now(timezone.utc).timestamp() - _MAX_HOURS * 3600
+            cutoff = datetime.now(UTC).timestamp() - _MAX_HOURS * 3600
             stale = []
             for ts in _LOCKED:
                 parsed = _parse_ts(ts)
@@ -91,7 +91,7 @@ def snapshot(minutes_back: int) -> list[dict]:
     with _LOCK:
         items = list(_LOCKED.items())
 
-    cutoff_ts = datetime.now(timezone.utc).timestamp() - minutes_back * 60
+    cutoff_ts = datetime.now(UTC).timestamp() - minutes_back * 60
 
     out = []
     for ts, vals in items:

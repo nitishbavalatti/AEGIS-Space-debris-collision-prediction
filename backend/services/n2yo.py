@@ -4,8 +4,10 @@ Provides ISS live position, pass predictions, and satellite above queries.
 
 API Docs: https://www.n2yo.com/api/
 """
-import requests
 import logging
+
+import requests
+
 from backend.config import Config
 from backend.services.cache import cache
 

@@ -1,6 +1,7 @@
 """ISS routes — live position, proximity, passes."""
-from flask import Blueprint, jsonify, current_app
 import logging
+
+from flask import Blueprint, current_app, jsonify
 
 logger = logging.getLogger(__name__)
 iss_bp = Blueprint("iss", __name__, url_prefix="/api/iss")
@@ -9,9 +10,9 @@ iss_bp = Blueprint("iss", __name__, url_prefix="/api/iss")
 @iss_bp.route("/position")
 def iss_position():
     """GET /api/iss/position — live ISS lat/lon/alt from N2YO or fallback to TLE."""
+    from backend.data.pipeline import tle_to_position
     from backend.services.n2yo import get_iss_position
     from backend.services.spacetrack import get_iss_tle
-    from backend.data.pipeline import tle_to_position
 
     pos = get_iss_position()
     if pos and pos.get("lat") is not None and pos.get("lon") is not None:
