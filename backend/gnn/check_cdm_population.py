@@ -12,8 +12,8 @@ No torch, no Space-Track, runs in a second:
   python -m backend.gnn.check_cdm_population
 """
 import json
-import sys
 import statistics
+import sys
 from collections import Counter
 
 PATH = sys.argv[1] if len(sys.argv) > 1 else "gnn/cdm_holdout_nodes.json"

@@ -9,6 +9,7 @@ highest active alert level changes.
 import json
 import logging
 import os
+
 import paho.mqtt.client as mqtt
 
 logger = logging.getLogger(__name__)

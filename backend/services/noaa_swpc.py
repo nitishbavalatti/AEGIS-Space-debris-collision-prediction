@@ -2,11 +2,11 @@
 NOAA SWPC (Space Weather Prediction Center) service.
 """
 
-import re
-import time
 import logging
+import re
 import threading
-from datetime import datetime, timedelta, timezone
+import time
+from datetime import UTC, datetime, timedelta
 
 import requests
 
@@ -23,7 +23,7 @@ NOAA_FLARES_URL = "https://services.swpc.noaa.gov/json/goes/primary/xray-flares-
 # which needs Config.NASA_API_KEY ("DEMO_KEY" is rate-limited) and was observed redirecting
 # to a CCMC notice page instead of returning JSON.
 def _cme_urls(days_back: int) -> list[str]:
-    end = datetime.now(timezone.utc).date()
+    end = datetime.now(UTC).date()
     start = end - timedelta(days=max(1, days_back))
     gateway = getattr(Config, "NASA_DONKI_URL", "https://api.nasa.gov/DONKI")
     return [
@@ -81,7 +81,7 @@ STALE_SOURCE_THRESHOLD_MINUTES = 10
 
 
 def _date_range(days_back: int = 7):
-    end = datetime.now(timezone.utc)
+    end = datetime.now(UTC)
     start = end - timedelta(days=days_back)
     return start, end
 
@@ -99,14 +99,14 @@ def _parse_time_str(ts: str) -> datetime:
     _parse_time_str_strict below instead.
     """
     if not ts:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
     try:
         parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return parsed
     except Exception:
-        return datetime.min.replace(tzinfo=timezone.utc)
+        return datetime.min.replace(tzinfo=UTC)
 
 
 def _parse_time_str_strict(ts: str) -> datetime | None:
@@ -122,7 +122,7 @@ def _parse_time_str_strict(ts: str) -> datetime | None:
     try:
         parsed = datetime.fromisoformat(ts.replace("Z", "+00:00"))
         if parsed.tzinfo is None:
-            parsed = parsed.replace(tzinfo=timezone.utc)
+            parsed = parsed.replace(tzinfo=UTC)
         return parsed
     except Exception:
         return None
@@ -416,7 +416,7 @@ def get_geomag_realtime(minutes_back: int = 180) -> list[dict]:
         print(f"[NOAA] geomag unexpected schema: expected list[dict], got {type(rows)}")
         return []
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     cutoff = now - timedelta(minutes=minutes_back)
     future_guard = now + timedelta(minutes=5)  # small clock-skew tolerance
 

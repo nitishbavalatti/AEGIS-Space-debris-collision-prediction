@@ -5,9 +5,9 @@ Lightweight TTL cache for external API responses.
 Prevents rate-limiting Space-Track, NOAA SWPC, and N2YO.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-import time
-import threading
 import logging
+import threading
+import time
 
 logger = logging.getLogger(__name__)
 

@@ -18,9 +18,9 @@ Why this exists:
 
 Run: python -m backend.gnn.inspect_cdm_fields
 """
+import logging
 import os
 import sys
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 

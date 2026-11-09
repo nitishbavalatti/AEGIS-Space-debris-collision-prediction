@@ -9,18 +9,21 @@ WebSocket:  ws://localhost:5000/socket.io
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
 import eventlet
+
 eventlet.monkey_patch()
 import logging
 import os
-from flask import Flask, request, jsonify
-from flask_socketio import SocketIO, emit
+
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_socketio import SocketIO, emit
 
-from backend.config import Config   # loads .env first, so buzzer_alert sees MQTT_BROKER
-from backend.routes.conjunction import conjunction_bp
 from backend.buzzer_alert import init_buzzer
+from backend.config import Config  # loads .env first, so buzzer_alert sees MQTT_BROKER
+from backend.routes.conjunction import conjunction_bp
+
 init_buzzer()
 logging.basicConfig(
     level=logging.INFO,
@@ -128,7 +131,7 @@ def on_connect():
 
 @socketio.on("disconnect")
 def on_disconnect():
-    logger.info(f"Client disconnected")
+    logger.info("Client disconnected")
 
 
 @socketio.on("request_sensor_data")

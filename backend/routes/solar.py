@@ -1,9 +1,9 @@
 """Solar weather routes — NOAA SWPC status, sensor correlation data."""
-from flask import Blueprint, jsonify, request, current_app
 import logging
 
-from backend.services import risk_history
-from backend.services import geomag_history
+from flask import Blueprint, current_app, jsonify, request
+
+from backend.services import geomag_history, risk_history
 
 logger = logging.getLogger(__name__)
 solar_bp = Blueprint("solar", __name__, url_prefix="/api/solar")
@@ -99,10 +99,12 @@ def test_noaa():
     Diagnostic endpoint — clears cache then hits NOAA SWPC directly.
     Check the server logs for the detailed error if reachable=false.
     """
-    from backend.services.noaa_swpc import (
-        clear_noaa_cache, get_kp_history, get_geomag_realtime
-    )
     from backend.config import Config
+    from backend.services.noaa_swpc import (
+        clear_noaa_cache,
+        get_geomag_realtime,
+        get_kp_history,
+    )
 
     clear_noaa_cache()
 
@@ -143,7 +145,11 @@ def sensor_correlation():
     GET /api/solar/correlation?hours=24
     Real NOAA geomagnetic field (L1 IMF Bt/Bz) vs GNN risk score history.
     """
-    from backend.services.noaa_swpc import get_geomag_realtime, get_kp_history, _parse_kp
+    from backend.services.noaa_swpc import (
+        _parse_kp,
+        get_geomag_realtime,
+        get_kp_history,
+    )
 
     hours = int(request.args.get("hours", 24))
     state = current_app.config["APP_STATE"]

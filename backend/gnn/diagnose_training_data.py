@@ -24,15 +24,18 @@ learn from this data:
 Run: python -m backend.gnn.diagnose_training_data
 (same import path as train.py — copy into backend/gnn/ alongside it)
 """
+import logging
 import os
 import sys
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from backend.gnn.model import build_graph_from_tle_data
-from backend.gnn.train import build_labels_from_cdm, DENSE_BANDS
-from backend.services.spacetrack import get_debris_tle_sample_with_cdm_positives, get_cdm
+from backend.gnn.train import build_labels_from_cdm
+from backend.services.spacetrack import (
+    get_cdm,
+    get_debris_tle_sample_with_cdm_positives,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

@@ -16,9 +16,9 @@ This script isolates exactly which case it is, instead of guessing again.
 
 Run: python -m backend.gnn.trace_high_risk_ids
 """
+import logging
 import os
 import sys
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 

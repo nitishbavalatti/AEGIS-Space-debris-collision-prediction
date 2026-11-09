@@ -16,22 +16,30 @@ Why this exists:
 
 Run: python -m backend.gnn.train_kfold
 """
+import logging
 import os
-import sys
 import random
 import statistics
+import sys
+
 import torch
 import torch.nn.functional as F
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from backend.gnn.model import DebrisGNN, build_graph_from_tle_data
 from backend.gnn.train import (
-    build_labels_from_cdm, _weighted_bce, _prf1,
-    EPOCHS, LR, DEVICE,
+    DEVICE,
+    EPOCHS,
+    LR,
+    _prf1,
+    _weighted_bce,
+    build_labels_from_cdm,
 )
-from backend.services.spacetrack import get_debris_tle_sample_with_cdm_positives, get_cdm
+from backend.services.spacetrack import (
+    get_cdm,
+    get_debris_tle_sample_with_cdm_positives,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

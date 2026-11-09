@@ -10,9 +10,9 @@ into a circular import once either side grows). Routes only ever READ
 from this module; tasks.py is the only writer that matters for data
 quality — see the module docstring note below.
 """
-from collections import deque
-from datetime import datetime, timezone
 import threading
+from collections import deque
+from datetime import UTC, datetime
 
 _LOCK = threading.Lock()
 _HISTORY: deque[tuple[str, float]] = deque(maxlen=20000)  # generous cap; trimmed by age below
@@ -46,7 +46,7 @@ def record_risk_score(risk_score, min_interval_seconds: float = 5.0) -> None:
     except (TypeError, ValueError):
         return
 
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     ts = now.isoformat()
 
     with _LOCK:

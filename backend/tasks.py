@@ -1,12 +1,13 @@
 """
 AEGIS Background Tasks
 """
+import logging
 import threading
 import time
-import logging
-from datetime import datetime, timezone
-from backend.config import Config
+from datetime import UTC, datetime
+
 from backend.buzzer_alert import publish_buzzer_state
+from backend.config import Config
 from backend.services import risk_history
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def _get_live_kp() -> float:
     Falls back to 2.0 (quiet baseline) if NOAA is unreachable.
     """
     try:
-        from backend.services.noaa_swpc import get_kp_history, _parse_kp
+        from backend.services.noaa_swpc import _parse_kp, get_kp_history
         events, ok = get_kp_history(days_back=1)
         if ok and events:
             return float(max(_parse_kp(e) for e in events))
@@ -115,7 +116,7 @@ def _parse_epoch(s):
             head, frac = s.split(".", 1)
             s = head + "." + frac[:6]
         t = datetime.fromisoformat(s)
-        return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        return t if t.tzinfo else t.replace(tzinfo=UTC)
     except Exception:
         return None
 
@@ -125,7 +126,7 @@ def _drop_unusable(debris, now=None):
     Fields that are missing or unparseable never cause a drop. If the filter
     would remove EVERYTHING (e.g. an unexpected data format) the original list
     is returned untouched, so a bad assumption can never blank the dashboard."""
-    now = now or datetime.now(timezone.utc)
+    now = now or datetime.now(UTC)
     counts = {"decayed": 0, "re_entering": 0, "stale_epoch": 0}
     kept = []
     for o in debris:
@@ -172,7 +173,10 @@ def run_debris_pipeline(app) -> bool:
             logger.info("[Pipeline] Starting debris data refresh...")
             t0 = time.time()
             try:
-                from backend.services.spacetrack import get_debris_tle, last_debris_source
+                from backend.services.spacetrack import (
+                    get_debris_tle,
+                    last_debris_source,
+                )
                 real_mode = getattr(Config, "DATA_MODE", "REAL") != "MOCK"
                 state["debris_data_stale"] = False
 
@@ -200,7 +204,7 @@ def run_debris_pipeline(app) -> bool:
 
                 if real_mode:
                     from backend.data.pipeline import tle_to_position
-                    now = datetime.now(timezone.utc)
+                    now = datetime.now(UTC)
                     for k, obj in enumerate(debris):
                         if k % 250 == 0:
                             time.sleep(0)   # app.py runs under eventlet: yield so the web server isn't starved
@@ -293,9 +297,9 @@ def run_conjunction_screener(app) -> bool:
 
         try:
             from backend.data.conjunction_screener import (
+                generate_mock_conjunctions,
                 screen_conjunctions,
                 screen_debris_conjunctions,
-                generate_mock_conjunctions,
             )
 
             debris   = state.get("debris_objects", [])
@@ -415,9 +419,9 @@ def run_iss_updater(app):
         try:
             with app.app_context():
                 state = app.config["APP_STATE"]
+
+                from backend.data.pipeline import compute_iss_proximity, tle_to_position
                 from backend.services.n2yo import get_iss_position
-                from backend.data.pipeline import tle_to_position, compute_iss_proximity
-                import math
 
                 iss_pos = get_iss_position()
                 state["iss_position"] = iss_pos
@@ -445,7 +449,7 @@ def run_iss_updater(app):
                 # each at its own datetime.now() spread the positions over the
                 # ~0.3 s the loop takes — at ~7.7 km/s that is a ~2-3 km error,
                 # comparable to the 5/10 km alert thresholds.
-                now = datetime.now(timezone.utc)
+                now = datetime.now(UTC)
                 iss_eci = None
                 if iss_tle:
                     p = tle_to_position(iss_tle.get("TLE_LINE1", ""), iss_tle.get("TLE_LINE2", ""), now)
@@ -587,7 +591,8 @@ def _score_debris(debris):
 
 
 def _generate_mock_debris(count=500):
-    import random, math
+    import math
+    import random
     COUNTRIES = ["US", "CIS", "PRC", "ESA", "JPN", "IND", "FRA", "GBR"]
     NAMES = ["COSMOS DEB", "SL-8 DEB", "FENGYUN DEB", "IRIDIUM DEB",
              "ARIANE DEB", "DELTA DEB", "CENTAUR DEB", "TITAN DEB"]

@@ -13,10 +13,10 @@ If the counts stay flat or odd, something is wrong.
 Run (backend must be running):
   python -m backend.gnn.screen_sensitivity
 """
+import logging
 import os
 import sys
 import time
-import logging
 
 import requests
 

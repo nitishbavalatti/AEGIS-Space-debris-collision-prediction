@@ -18,12 +18,12 @@ Occasional solar storm spikes are injected to demonstrate the
 sensor→GNN correlation graph on the dashboard.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
-import time
+import logging
 import math
 import random
-import logging
 import threading
-from datetime import datetime, timezone
+import time
+from datetime import UTC, datetime
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ class MockSensor:
         storm_alert = kp_proxy >= 5.0
 
         reading = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "tick": self._tick,
             "source": "mock",  # ← becomes "rtlsdr" when hardware connected
 

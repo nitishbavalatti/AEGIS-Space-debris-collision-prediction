@@ -15,17 +15,17 @@ Run (from the project root):
   python -m backend.gnn.compare_to_spacetrack
 Output: terminal table + gnn/spacetrack_comparison.json
 """
-import os
-import sys
 import json
 import logging
+import os
 import statistics
-from datetime import datetime, timezone, timedelta
+import sys
+from datetime import UTC, datetime, timedelta
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
+from backend.data.conjunction_screener import _dist, _propagate_object_bulk, _rel_vel
 from backend.services.spacetrack import get_cdm, get_tle_by_norad_ids
-from backend.data.conjunction_screener import _propagate_object_bulk, _dist, _rel_vel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ def _parse_tca(s: str) -> datetime:
         head, frac = s.split(".", 1)
         s = head + "." + frac[:6]
     t = datetime.fromisoformat(s)
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+    return t if t.tzinfo else t.replace(tzinfo=UTC)
 
 
 def _dedupe(cdms: list[dict]) -> list[dict]:
@@ -110,7 +110,7 @@ def run(cdm_limit: int = 100):
         })
 
     summary = {
-        "generated": datetime.now(timezone.utc).isoformat(),
+        "generated": datetime.now(UTC).isoformat(),
         "cdm_records": len(raw), "unique_conjunctions": len(cdms),
         "compared": len(rows), "skipped_no_tle": no_tle, "skipped_other": bad,
     }

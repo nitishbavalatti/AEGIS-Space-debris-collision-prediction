@@ -12,21 +12,26 @@ Label construction (3-component soft label):
 Run: python -m backend.gnn.train
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 """
+import logging
 import os
-import sys
-import math
 import random
+import sys
+
 import torch
 import torch.nn.functional as F
-import logging
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from backend.gnn.model import (
-    DebrisGNN, build_graph_from_tle_data,
-    NODE_FEATURE_DIM, FEATURE_VERSION, _project_altitude,
+    FEATURE_VERSION,
+    DebrisGNN,
+    _project_altitude,
+    build_graph_from_tle_data,
 )
-from backend.services.spacetrack import get_debris_tle_sample_with_cdm_positives, get_cdm
+from backend.services.spacetrack import (
+    get_cdm,
+    get_debris_tle_sample_with_cdm_positives,
+)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
